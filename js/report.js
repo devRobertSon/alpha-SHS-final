@@ -29,28 +29,45 @@ export function buildDirectorReport({
   const info = (text) => checks.push({ level: "info", text });
 
   const doc = el("div", { class: "report-doc" });
+  let secNo = 0;
+  const section = (title, children) =>
+    el("div", { class: "rd-section" }, [
+      el("div", { class: "rd-sec-head" }, [
+        el("span", { class: "rd-num", text: String(++secNo) }),
+        el("h2", { text: title }),
+      ]),
+      ...children,
+    ]);
 
   // ---------- 헤더 ----------
   const today = toYMD(new Date());
   doc.appendChild(
     el("div", { class: "rd-header" }, [
-      el("h1", { text: `[${academyName}] 주간 수업 현황 보고서` }),
-      el("div", { class: "rd-sub", text: W.label }),
-      el("div", {
-        class: "rd-meta",
-        text: `작성: ${teacherName || "담당 교사"} · 생성일: ${today}`,
-      }),
+      el("div", { class: "rd-head-main" }, [
+        el("span", { class: "rd-academy-chip", text: academyName }),
+        el("h1", { text: "주간 수업 현황 보고서" }),
+        el("div", {
+          class: "rd-meta",
+          text: `작성 ${teacherName || "담당 교사"} · 생성일 ${today}`,
+        }),
+      ]),
+      el("div", { class: "rd-week-box" }, [
+        el("div", { class: "rd-week-label", text: "보고 주차" }),
+        el("div", { class: "rd-week", text: W.label }),
+      ]),
     ])
   );
 
   // ---------- ① 수업 진도 (W) ----------
   const progress = (W.progress || "").trim();
   if (!progress) warn("이번 주 진도가 입력되지 않았습니다 ('진도' 탭에서 입력).");
-  doc.appendChild(section("1. 수업 진도", [
-    progress
-      ? el("p", { class: "rd-text", text: progress })
-      : el("p", { class: "rd-empty", text: "(입력되지 않음)" }),
-  ]));
+  doc.appendChild(
+    section("수업 진도", [
+      progress
+        ? el("p", { class: "rd-text rd-progress", text: progress })
+        : el("p", { class: "rd-empty", text: "(입력되지 않음)" }),
+    ])
+  );
 
   // ---------- ② 출석 현황 (W) ----------
   const attChildren = [];
@@ -74,25 +91,29 @@ export function buildDirectorReport({
       const row = el("tr", {}, [el("td", { class: "rd-name", text: s.name })]);
       for (const d of sessions) {
         const code = att[d];
-        const label = ATTENDANCE[code]?.label;
-        if (label) tally[code]++;
-        else {
+        const a = ATTENDANCE[code];
+        if (a) {
+          tally[code]++;
+          row.appendChild(
+            el("td", {}, [el("span", { class: `rd-chip ${a.cls}`, text: a.label })])
+          );
+        } else {
           blank++;
           missing.push(`${s.name}(${d.slice(5).replace("-", "/")})`);
+          row.appendChild(el("td", {}, [el("span", { class: "rd-dash", text: "–" })]));
         }
-        row.appendChild(el("td", { text: label || "–" }));
       }
       tbl.appendChild(row);
     }
     if (missing.length) warn(`출석 미입력: ${missing.join(", ")}`);
-    const summary = ATTENDANCE_ORDER.filter((c) => tally[c] > 0)
-      .map((c) => `${ATTENDANCE[c].label} ${tally[c]}`)
-      .concat(blank ? [`미입력 ${blank}`] : [])
-      .join(" · ");
-    attChildren.push(tbl);
-    attChildren.push(el("p", { class: "rd-note", text: `집계: ${summary || "기록 없음"}` }));
+    const parts = ATTENDANCE_ORDER.filter((c) => tally[c] > 0).map(
+      (c) => `${ATTENDANCE[c].label} ${tally[c]}`
+    );
+    if (blank) parts.push(`미입력 ${blank}`);
+    attChildren.push(el("div", { class: "rd-table-wrap" }, [tbl]));
+    attChildren.push(el("p", { class: "rd-note", text: parts.length ? `집계 · ${parts.join(" · ")}` : "기록 없음" }));
   }
-  doc.appendChild(section("2. 출석 현황", attChildren));
+  doc.appendChild(section("출석 현황", attChildren));
 
   // ---------- ③ 지난 주 숙제 수행 (P) ----------
   if (!P) {
@@ -120,27 +141,39 @@ export function buildDirectorReport({
         const hw = s.blob.weeks?.[P.id]?.homework || {};
         const done = items.filter((it) => hw[it.id]).length;
         doneAll += done;
+        const rate = Math.round((done / items.length) * 100);
         tbl.appendChild(
           el("tr", {}, [
             el("td", { class: "rd-name", text: s.name }),
-            ...items.map((it) => el("td", { text: hw[it.id] ? "O" : "X" })),
-            el("td", { text: `${Math.round((done / items.length) * 100)}%` }),
+            ...items.map((it) =>
+              el("td", {}, [
+                hw[it.id]
+                  ? el("span", { class: "rd-check", text: "✓" })
+                  : el("span", { class: "rd-dash", text: "–" }),
+              ])
+            ),
+            el("td", { class: "rd-rate" }, [
+              el("span", { class: "rd-bar", "aria-hidden": "true" }, [
+                el("span", { class: "rd-bar-fill", style: `width:${rate}%` }),
+              ]),
+              el("span", { text: `${rate}%` }),
+            ]),
           ])
         );
       }
       const totalRate = students.length
         ? Math.round((doneAll / (items.length * students.length)) * 100)
         : 0;
-      hwChildren.push(tbl);
-      hwChildren.push(el("p", { class: "rd-note", text: `전체 완료율: ${totalRate}%` }));
+      hwChildren.push(el("div", { class: "rd-table-wrap" }, [tbl]));
+      hwChildren.push(el("p", { class: "rd-note", text: `전체 완료율 · ${totalRate}%` }));
     }
-    doc.appendChild(section(`3. 지난 주 숙제 수행 (${P.label})`, hwChildren));
+    doc.appendChild(section(`지난 주 숙제 수행 — ${P.label}`, hwChildren));
 
     // ---------- ④ 지난 주 퀴즈 결과 + 자동 분석 (P) ----------
     const quizChildren = [];
     const scores = [];
     const noScore = [];
-    const tbl = el("table", { class: "rd-table" });
+    const tbl = el("table", { class: "rd-table rd-quiz-table" });
     tbl.appendChild(el("tr", {}, [el("th", { text: "이름" }), el("th", { text: "점수" })]));
     let max = 100;
     for (const s of students) {
@@ -149,27 +182,47 @@ export function buildDirectorReport({
         scores.push(q.score);
         max = q.max || max;
       } else noScore.push(s.name);
+    }
+    const hi = scores.length ? Math.max(...scores) : null;
+    for (const s of students) {
+      const q = s.blob.weeks?.[P.id]?.quiz;
       tbl.appendChild(
-        el("tr", {}, [
+        el("tr", { class: q && q.score === hi ? "rd-top" : "" }, [
           el("td", { class: "rd-name", text: s.name }),
-          el("td", { text: q ? String(q.score) : "–" }),
+          el("td", { class: "rd-score", text: q ? String(q.score) : "–" }),
         ])
       );
     }
     if (noScore.length) warn(`지난 주 퀴즈 점수 미입력: ${noScore.join(", ")}`);
-    quizChildren.push(tbl);
+
     if (scores.length) {
       const avg = Math.round((scores.reduce((a, b) => a + b, 0) / scores.length) * 10) / 10;
-      const hi = Math.max(...scores);
       const lo = Math.min(...scores);
+      quizChildren.push(
+        el("div", { class: "rd-stats" }, [
+          statTile("반 평균", `${avg}점`),
+          statTile("최고", `${hi}점`),
+          statTile("최저", `${lo}점`),
+          statTile("응시", `${scores.length}명`, `만점 ${max}점`),
+        ])
+      );
+      quizChildren.push(el("div", { class: "rd-table-wrap" }, [tbl]));
+
+      // 반 평균 추이 (P까지의 주차별 평균)
+      const trendData = sorted.slice(0, wIdx).map((w) => ({
+        label: String(w.label).replace(/\s*\(.*\)\s*/, ""),
+        avg: weekAvg(w, students),
+        isP: w.id === P.id,
+      })).filter((d) => d.avg != null);
+      if (trendData.length >= 2) {
+        quizChildren.push(el("h3", { class: "rd-h3", text: "반 평균 추이" }));
+        quizChildren.push(renderTrend(trendData, max));
+      }
+
       let trend = "";
       if (PP) {
-        const prevScores = students
-          .map((s) => s.blob.weeks?.[PP.id]?.quiz?.score)
-          .filter((v) => v != null);
-        if (prevScores.length) {
-          const prevAvg =
-            Math.round((prevScores.reduce((a, b) => a + b, 0) / prevScores.length) * 10) / 10;
+        const prevAvg = weekAvg(PP, students);
+        if (prevAvg != null) {
           const diff = Math.round((avg - prevAvg) * 10) / 10;
           trend =
             diff > 0
@@ -180,19 +233,18 @@ export function buildDirectorReport({
         }
       }
       quizChildren.push(
-        el("p", { class: "rd-note", text: `응시 ${scores.length}명 / 만점 ${max}점 기준 · 평균 ${avg}점 · 최고 ${hi}점 · 최저 ${lo}점` })
-      );
-      quizChildren.push(
-        el("p", {
-          class: "rd-text",
-          text: `분석: 응시 인원 ${scores.length}명의 평균은 ${avg}점(만점 ${max}점)이며, 최고 ${hi}점 · 최저 ${lo}점으로 편차는 ${hi - lo}점입니다.${trend}`,
-        })
+        el("div", { class: "rd-callout" }, [
+          el("strong", { text: "분석 " }),
+          el("span", {
+            text: `응시 인원 ${scores.length}명의 평균은 ${avg}점(만점 ${max}점)이며, 최고 ${hi}점 · 최저 ${lo}점으로 편차는 ${hi - lo}점입니다.${trend}`,
+          }),
+        ])
       );
     } else {
       warn(`지난 주(${P.label}) 퀴즈 점수가 하나도 입력되지 않았습니다.`);
       quizChildren.push(el("p", { class: "rd-empty", text: "(점수 없음)" }));
     }
-    doc.appendChild(section(`4. 지난 주 퀴즈 결과 (${P.label})`, quizChildren));
+    doc.appendChild(section(`지난 주 퀴즈 결과 — ${P.label}`, quizChildren));
   }
 
   // ---------- ⑤ 공지사항 (W 기간 + 고정) ----------
@@ -209,20 +261,21 @@ export function buildDirectorReport({
     for (const n of included) {
       noticeChildren.push(
         el("div", { class: "rd-notice" }, [
-          el("div", {
-            class: "rd-notice-title",
-            text: `${n.pinned ? "📌 " : ""}${n.title} (${n.date || ""})`,
-          }),
+          el("div", { class: "rd-notice-title" }, [
+            n.pinned ? el("span", { class: "rd-pin", text: "고정" }) : null,
+            el("span", { text: n.title }),
+            el("span", { class: "rd-notice-date", text: n.date || "" }),
+          ]),
           n.body ? el("div", { class: "rd-text", text: n.body }) : null,
         ])
       );
     }
   }
-  doc.appendChild(section("5. 공지사항", noticeChildren));
+  doc.appendChild(section("공지사항", noticeChildren));
 
   // ---------- 푸터 ----------
   doc.appendChild(
-    el("div", { class: "rd-footer", text: `본 보고서는 학습 포털에서 자동 생성되었습니다. (${today})` })
+    el("div", { class: "rd-footer", text: `본 보고서는 학습 포털에서 자동 생성되었습니다 · ${today}` })
   );
 
   // ---------- 검사 결과 정리 ----------
@@ -233,6 +286,65 @@ export function buildDirectorReport({
   return { checks, doc };
 }
 
-function section(title, children) {
-  return el("div", { class: "rd-section" }, [el("h2", { text: title }), ...children]);
+function statTile(label, value, sub) {
+  return el("div", { class: "rd-stat" }, [
+    el("div", { class: "rd-stat-label", text: label }),
+    el("div", { class: "rd-stat-value", text: value }),
+    sub ? el("div", { class: "rd-stat-sub", text: sub }) : null,
+  ]);
+}
+
+// 해당 주차의 반 평균 (quizStats 우선, 없으면 직접 계산)
+function weekAvg(week, students) {
+  if (week.quizStats?.avg != null) return week.quizStats.avg;
+  const scores = students
+    .map((s) => s.blob.weeks?.[week.id]?.quiz?.score)
+    .filter((v) => v != null);
+  if (!scores.length) return null;
+  return Math.round((scores.reduce((a, b) => a + b, 0) / scores.length) * 10) / 10;
+}
+
+// 반 평균 추이 미니 차트 (단일 계열 — 제목이 곧 범례, 점 위 직접 라벨)
+function renderTrend(data, maxScore) {
+  const W = 360;
+  const H = 110;
+  const M = { top: 22, right: 18, bottom: 20, left: 18 };
+  const n = data.length;
+  const vals = data.map((d) => d.avg);
+  const lo = Math.max(0, Math.min(...vals) - 8);
+  const hi = Math.min(maxScore, Math.max(...vals) + 8);
+  const x = (i) => M.left + (n === 1 ? (W - M.left - M.right) / 2 : (i / (n - 1)) * (W - M.left - M.right));
+  const y = (v) => M.top + (H - M.top - M.bottom) * (1 - (v - lo) / Math.max(1, hi - lo));
+
+  // 라벨: 6개 이하면 전부, 많으면 처음/끝/최고/최저만
+  const labelIdx = new Set();
+  if (n <= 6) for (let i = 0; i < n; i++) labelIdx.add(i);
+  else {
+    labelIdx.add(0);
+    labelIdx.add(n - 1);
+    labelIdx.add(vals.indexOf(Math.max(...vals)));
+    labelIdx.add(vals.indexOf(Math.min(...vals)));
+  }
+
+  let s = `<line x1="${M.left - 6}" y1="${H - M.bottom}" x2="${W - M.right + 6}" y2="${H - M.bottom}" stroke="#c3c2b7" stroke-width="1"/>`;
+  s += `<polyline points="${data.map((d, i) => `${x(i)},${y(d.avg)}`).join(" ")}" fill="none" stroke="#2a78d6" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>`;
+  data.forEach((d, i) => {
+    s += `<circle cx="${x(i)}" cy="${y(d.avg)}" r="${d.isP ? 4.5 : 3.5}" fill="#2a78d6" stroke="#ffffff" stroke-width="2"/>`;
+    if (labelIdx.has(i)) {
+      s += `<text x="${x(i)}" y="${y(d.avg) - 8}" text-anchor="middle" font-size="9.5" font-weight="${d.isP ? 700 : 400}" fill="#0b0b0b">${d.avg}</text>`;
+    }
+    const anchor = i === 0 ? "start" : i === n - 1 ? "end" : "middle";
+    const every = Math.max(1, Math.ceil(n / 6));
+    if (i % every === 0 || i === n - 1) {
+      s += `<text x="${x(i)}" y="${H - M.bottom + 13}" text-anchor="${anchor}" font-size="9" fill="#898781">${escapeXML(d.label)}</text>`;
+    }
+  });
+
+  const box = el("div", { class: "rd-chart" });
+  box.innerHTML = `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="주차별 반 평균 추이" style="width:100%;height:auto;display:block">${s}</svg>`;
+  return box;
+}
+
+function escapeXML(t) {
+  return String(t).replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;");
 }
