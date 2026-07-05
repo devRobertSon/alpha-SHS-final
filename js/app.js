@@ -253,7 +253,7 @@ function renderQuiz(container, week, weeks) {
     const stats = week.quizStats;
     card.appendChild(
       el("div", { class: "stat-row" }, [
-        statTile("내 점수", q ? String(q.score) : "–", q ? `/ ${q.max}` : ""),
+        statTile("내 점수", q ? String(q.score) : "–", q ? `만점 ${q.max}` : ""),
         statTile("반 평균", stats && stats.avg != null ? String(stats.avg) : "–", ""),
         statTile("응시 인원", stats && stats.count != null ? `${stats.count}명` : "–", ""),
       ])
@@ -282,7 +282,8 @@ function renderQuiz(container, week, weeks) {
 function statTile(label, value, sub) {
   return el("div", { class: "stat-tile" }, [
     el("div", { class: "label", text: label }),
-    el("div", { class: "value" }, [value, sub ? el("small", { text: " " + sub }) : null]),
+    el("div", { class: "value", text: value }),
+    sub ? el("div", { class: "sub", text: sub }) : null,
   ]);
 }
 
