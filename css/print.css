@@ -1,5 +1,6 @@
-/* print.css — A4 학생 코드 카드 인쇄 (2×4) */
-.print-cards {
+/* print.css — A4 인쇄: 학생 코드 카드(2×4) + 원장님 보고서 */
+.print-cards,
+.print-report {
   display: none;
 }
 
@@ -8,7 +9,9 @@
     visibility: hidden;
   }
   .print-cards,
-  .print-cards * {
+  .print-cards *,
+  .print-report,
+  .print-report * {
     visibility: visible;
   }
   .print-cards {
@@ -53,5 +56,86 @@
     font-size: 8pt;
     color: #444;
     line-height: 1.5;
+  }
+
+  /* ---------- 원장님 보고서 ---------- */
+  .print-report {
+    display: block !important;
+    position: absolute;
+    inset: 0;
+    background: #fff;
+    padding: 10mm 12mm;
+  }
+  .print-report .report-doc {
+    color: #000;
+    font-size: 11pt;
+    line-height: 1.5;
+  }
+  .print-report h1 {
+    font-size: 16pt;
+    margin: 0 0 2pt;
+  }
+  .print-report .rd-sub {
+    font-size: 12pt;
+    font-weight: 700;
+  }
+  .print-report .rd-meta {
+    font-size: 9.5pt;
+    color: #555;
+    margin-bottom: 8pt;
+  }
+  .print-report h2 {
+    font-size: 12.5pt;
+    margin: 12pt 0 5pt;
+    border-bottom: 1.5pt solid #000;
+    padding-bottom: 2pt;
+  }
+  .print-report .rd-section {
+    page-break-inside: avoid;
+    break-inside: avoid;
+  }
+  .print-report .rd-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 10pt;
+  }
+  .print-report .rd-table th,
+  .print-report .rd-table td {
+    border: 0.75pt solid #888;
+    padding: 3pt 6pt;
+    text-align: center;
+  }
+  .print-report .rd-table th {
+    background: #f0f0f0;
+  }
+  .print-report .rd-table .rd-name {
+    text-align: left;
+  }
+  .print-report .rd-text {
+    white-space: pre-wrap;
+  }
+  .print-report .rd-empty {
+    color: #777;
+  }
+  .print-report .rd-note {
+    font-size: 10pt;
+    color: #333;
+    margin: 4pt 0 0;
+  }
+  .print-report .rd-list {
+    margin: 3pt 0 6pt;
+    padding-left: 16pt;
+  }
+  .print-report .rd-notice {
+    margin: 5pt 0;
+  }
+  .print-report .rd-notice-title {
+    font-weight: 700;
+  }
+  .print-report .rd-footer {
+    margin-top: 14pt;
+    text-align: center;
+    font-size: 9pt;
+    color: #777;
   }
 }
