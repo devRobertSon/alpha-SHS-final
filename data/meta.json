@@ -1,0 +1,30 @@
+{
+ "v": 1,
+ "site": {
+  "title": "과학고 대비 학습 포털 (샘플)"
+ },
+ "kdf": {
+  "algo": "PBKDF2-SHA256",
+  "iterStudent": 310000,
+  "iterMaster": 600000
+ },
+ "saltStudent": "OhEbBUpBvNA9ZHjmGclUhQ==",
+ "saltMaster": "3TwJPcfSdH0+bKyyEaoxOg==",
+ "students": [
+  "d7eb4b921bc530e53fdb14120dba8cd0",
+  "9ada7e0a2727bcd6c91b0388c7b5a10c",
+  "bcf38324bad7a476588bbb1c0f48e2f4",
+  "50b8d72b444b60ec922d4850682be85d",
+  "65d81ce1eca1f8857600ab85c8550261",
+  "109a9e12f000faeb2233222bae61efcf",
+  "c6f9fdaa63101eddce595ea4a0fc466f",
+  "6d4aefbd258c0d76541870ee48e796ca",
+  "fe7e220dbe6f3749e57815a1a24e74ff",
+  "b91f50707d7137a4f8ca01d2e742cfa2"
+ ],
+ "academies": [
+  "53a34b57af62385ba670e0c6ed024673",
+  "c6eb56a456f16a66dde329b0eb3ff8c3"
+ ],
+ "publishedAt": "2026-07-05T15:06:56.040Z"
+}
