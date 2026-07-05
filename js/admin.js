@@ -120,7 +120,8 @@ function startWizard() {
       S.academies = model.academies;
       S.students = model.students;
       S.masterKey = model.masterKey;
-      // 전부 새 데이터 → 전부 dirty
+      // 이전 상태(재설정 경로 포함) 정리 후 전부 새 데이터 → 전부 dirty
+      clearDirty();
       for (const id of S.students.keys()) S.dirtyStudents.add(id);
       for (const id of S.academies.keys()) S.dirtyAcademies.add(id);
       S.rosterDirty = true;
@@ -166,6 +167,20 @@ function renderLogin(errorMsg) {
       btn,
       el("hr", { style: "border:none;border-top:1px solid var(--hairline);margin:16px 0" }),
       el("button", { class: "btn btn-small", text: "백업 파일로 복원 (비밀번호 분실 시)", onclick: renderRestore }),
+      el("div", { style: "height:8px" }),
+      el("button", {
+        class: "btn btn-small",
+        text: "🧹 처음부터 다시 설정 (초기 설정 마법사)",
+        onclick: async () => {
+          const ok = await confirmModal({
+            title: "초기 설정 다시 실행",
+            body: "기존 데이터(샘플 포함)를 새 데이터로 교체합니다. 발행하면 기존 학생 코드는 모두 무효가 되고 코드 카드를 다시 배부해야 합니다. 계속할까요?",
+            okText: "다시 설정",
+            danger: true,
+          });
+          if (ok) startWizard();
+        },
+      }),
     ]),
   ]);
   clear(mount).appendChild(container);
