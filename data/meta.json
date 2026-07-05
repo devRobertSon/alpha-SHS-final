@@ -1,30 +1,29 @@
 {
  "v": 1,
  "site": {
-  "title": "과학고 대비 학습 포털 (샘플)"
+  "title": "과학고 대비 학습 포털"
  },
  "kdf": {
   "algo": "PBKDF2-SHA256",
   "iterStudent": 310000,
   "iterMaster": 600000
  },
- "saltStudent": "OhEbBUpBvNA9ZHjmGclUhQ==",
- "saltMaster": "3TwJPcfSdH0+bKyyEaoxOg==",
+ "saltStudent": "BAu6bXK1kklAGN5UD89UNg==",
+ "saltMaster": "NGpmwJJEZJnJGlOZ+bw3mw==",
  "students": [
-  "d7eb4b921bc530e53fdb14120dba8cd0",
-  "9ada7e0a2727bcd6c91b0388c7b5a10c",
-  "bcf38324bad7a476588bbb1c0f48e2f4",
-  "50b8d72b444b60ec922d4850682be85d",
-  "65d81ce1eca1f8857600ab85c8550261",
-  "109a9e12f000faeb2233222bae61efcf",
-  "c6f9fdaa63101eddce595ea4a0fc466f",
-  "6d4aefbd258c0d76541870ee48e796ca",
-  "fe7e220dbe6f3749e57815a1a24e74ff",
-  "b91f50707d7137a4f8ca01d2e742cfa2"
+  "37f77a5b5b6346b2b09e9c1debfad9b2",
+  "553cdf35b95acf8a96269f45678bdc62",
+  "74c913c4faaaaf58016e5c8062ea64d3",
+  "f088f571dab6c46f409a6b623640023a",
+  "13bf5187196a55277a7c637f21d6ab85",
+  "aeec59c9bf9c9e8868ebd3f7ed5aebc7",
+  "16619ec6da820e6f12912eb3197232c1",
+  "b019de5afcaa88b77c363e49b6b14350",
+  "c0dc9ec6ddb05b12a11d303b5a743e1b"
  ],
  "academies": [
-  "53a34b57af62385ba670e0c6ed024673",
-  "c6eb56a456f16a66dde329b0eb3ff8c3"
+  "75375cc860698060e0c444897d16fc8a",
+  "769f5bf3bbc06710faf0f8958dd9165e"
  ],
- "publishedAt": "2026-07-05T15:06:56.040Z"
+ "publishedAt": "2026-07-05T15:56:59.601Z"
 }
