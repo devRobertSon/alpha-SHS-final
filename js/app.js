@@ -296,7 +296,7 @@ function renderQuiz(container) {
     card.appendChild(
       el("div", { class: "stat-row" }, [
         statTile("내 점수", String(myScores[latest.id]), `만점 ${latest.max || 100}`),
-        statTile("전체 평균", latest.stats?.avg != null ? String(latest.stats.avg) : "–", "두 학원 합산"),
+        statTile("전체 평균", latest.stats?.avg != null ? String(latest.stats.avg) : "–", ""),
         statTile("응시 인원", latest.stats?.count != null ? `${latest.stats.count}명` : "–", ""),
       ])
     );
