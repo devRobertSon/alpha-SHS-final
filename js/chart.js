@@ -141,6 +141,47 @@ export function renderScoreChart(container, { weeks, mine, avg, yMax = 100 }) {
   container.appendChild(caption);
 }
 
+// 점수 분포 히스토그램 (선생님 열람용): 만점 기준 10% 구간 막대
+export function renderHistogram(container, { scores, max = 100 }) {
+  clear(container);
+  if (!scores.length) {
+    container.appendChild(el("p", { class: "empty", text: "입력된 점수가 없습니다." }));
+    return;
+  }
+  const buckets = new Array(10).fill(0);
+  for (const s of scores) buckets[Math.min(9, Math.max(0, Math.floor((s / max) * 10)))]++;
+  const peak = Math.max(...buckets);
+
+  const W = 360;
+  const H = 140;
+  const M = { top: 16, right: 8, bottom: 20, left: 8 };
+  const iw = W - M.left - M.right;
+  const ih = H - M.top - M.bottom;
+  const slot = iw / 10;
+  const barW = Math.min(24, slot - 4);
+
+  let s = `<line x1="${M.left}" y1="${H - M.bottom}" x2="${W - M.right}" y2="${H - M.bottom}" stroke="${COLOR.axis}" stroke-width="1"/>`;
+  buckets.forEach((count, i) => {
+    const bx = M.left + i * slot + (slot - barW) / 2;
+    const bh = peak ? (count / peak) * (ih - 6) : 0;
+    const by = H - M.bottom - bh;
+    if (count > 0) {
+      // 위쪽만 둥근 막대 (바닥은 각지게)
+      const r = Math.min(4, bh);
+      s += `<path d="M${bx},${H - M.bottom} L${bx},${by + r} Q${bx},${by} ${bx + r},${by} L${bx + barW - r},${by} Q${bx + barW},${by} ${bx + barW},${by + r} L${bx + barW},${H - M.bottom} Z" fill="${COLOR.mine}"/>`;
+      s += `<text x="${bx + barW / 2}" y="${by - 4}" text-anchor="middle" font-size="10" fill="#0b0b0b">${count}</text>`;
+    }
+    if (i % 2 === 0) {
+      s += `<text x="${M.left + i * slot}" y="${H - M.bottom + 14}" text-anchor="middle" font-size="9" fill="${COLOR.tick}">${Math.round((i * max) / 10)}</text>`;
+    }
+  });
+  s += `<text x="${W - M.right}" y="${H - M.bottom + 14}" text-anchor="end" font-size="9" fill="${COLOR.tick}">${max}</text>`;
+
+  const box = el("div", { class: "chart-svg" });
+  box.innerHTML = `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="점수 분포 히스토그램" style="width:100%;height:auto;display:block">${s}</svg>`;
+  container.appendChild(box);
+}
+
 function legendLine(color, dashed) {
   return `<svg viewBox="0 0 28 10" width="28" height="10" aria-hidden="true"><line x1="1" y1="5" x2="27" y2="5" stroke="${color}" stroke-width="2"${
     dashed ? ' stroke-dasharray="5 4"' : ""

@@ -109,6 +109,7 @@ async function main() {
   await mkdir(path.join(dataDir, "s"), { recursive: true });
   await mkdir(path.join(dataDir, "a"), { recursive: true });
   await mkdir(path.join(dataDir, "m"), { recursive: true });
+  await mkdir(path.join(dataDir, "t"), { recursive: true });
 
   const saltStudent = randomSaltB64();
   const saltMaster = randomSaltB64();
@@ -116,7 +117,9 @@ async function main() {
 
   const rosterAcademies = [];
   const rosterStudents = [];
+  const rosterTeachers = [];
   const sampleLines = [];
+  const teacherLines = [];
 
   // 단원명이 같은 퀴즈는 전 학원 학생을 합쳐 전체 평균 계산 (admin recomputeStats와 동일 규칙)
   const unitPool = new Map();
@@ -201,6 +204,7 @@ async function main() {
     );
 
     // 학생들
+    const academyStudents = []; // 선생님 스냅샷용
     for (let si = 0; si < A.students.length; si++) {
       const name = A.students[si];
       const code = generateCode();
@@ -271,6 +275,47 @@ async function main() {
         path.join(root, `data/s/${fileId}.json`),
         JSON.stringify(await encryptJSON(aesKey, studentBlob), null, 1)
       );
+      academyStudents.push({ name, weeksData, quizScores });
+    }
+
+    // 선생님 열람 코드 + 스냅샷 (admin buildTeacherSnapshot과 동일 규칙)
+    {
+      const code = generateCode();
+      const { fileId, aesKey } = await deriveStudentKeys(code, saltStudent, ITER_STUDENT);
+      rosterTeachers.push({
+        code,
+        name: `${A.name} 선생님`,
+        fileId,
+        encKey: await exportAesKeyB64(aesKey),
+        academyFileId: aEntry.fileId,
+        active: true,
+      });
+      teacherLines.push(`| ${A.name} | \`${code}\` |`);
+      const attendance = {};
+      for (const w of A.weeks) {
+        attendance[w.id] = academyStudents.map((s) => ({
+          name: s.name,
+          byDate: { ...(s.weeksData[w.id]?.attendance || {}) },
+        }));
+      }
+      const snapQuizScores = {};
+      for (const q of A.quizzes) {
+        snapQuizScores[q.id] = academyStudents
+          .map((s) => s.quizScores[q.id])
+          .filter((v) => v != null)
+          .sort((a, b) => b - a);
+      }
+      const teacherBlob = {
+        v: FORMAT_VERSION,
+        type: "teacher",
+        name: `${A.name} 선생님`,
+        academy: { fileId: aEntry.fileId, key: aEntry.key, name: aEntry.name },
+        snapshot: { attendance, quizScores: snapQuizScores },
+      };
+      await writeFile(
+        path.join(root, `data/t/${fileId}.json`),
+        JSON.stringify(await encryptJSON(aesKey, teacherBlob), null, 1)
+      );
     }
   }
 
@@ -282,6 +327,7 @@ async function main() {
     saltMaster,
     students: rosterStudents.map((s) => s.fileId),
     academies: rosterAcademies.map((a) => a.fileId),
+    teachers: rosterTeachers.map((t) => t.fileId),
     publishedAt: new Date().toISOString(),
   };
   await writeFile(path.join(dataDir, "meta.json"), JSON.stringify(meta, null, 1));
@@ -293,6 +339,7 @@ async function main() {
     siteURL: "",
     academies: rosterAcademies,
     students: rosterStudents,
+    teachers: rosterTeachers,
   };
   await writeFile(
     path.join(dataDir, "roster.json"),
@@ -312,6 +359,12 @@ async function main() {
 | 학원 | 학생 | 접속 코드 |
 |------|------|-----------|
 ${sampleLines.join("\n")}
+
+## 선생님 열람 코드 (index.html — 출석·공지·점수 분포만)
+
+| 학원 | 접속 코드 |
+|------|-----------|
+${teacherLines.join("\n")}
 
 > 이 파일은 \`node dev/make-sample.mjs\` 실행 시마다 새로 생성됩니다.
 `;

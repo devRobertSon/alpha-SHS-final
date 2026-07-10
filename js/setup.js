@@ -241,6 +241,7 @@ async function buildModel(state, rosters, siteURL) {
     saltMaster,
     students: rosterStudents.map((s) => s.fileId),
     academies: academyEntries.map((a) => a.fileId),
+    teachers: [],
     publishedAt: null,
   };
 
@@ -251,6 +252,7 @@ async function buildModel(state, rosters, siteURL) {
     siteURL: siteURL || "",
     academies: academyEntries,
     students: rosterStudents,
+    teachers: [], // 선생님 열람 코드 (학생 관리 탭에서 발급)
   };
 
   return { meta, roster, academies, students, masterKey };

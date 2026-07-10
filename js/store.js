@@ -32,26 +32,36 @@ export async function metaExists() {
   }
 }
 
-// 학생 로그인: 코드 → fileId 대조 → 학생 blob + 소속 학원 blob 복호화
-// 반환: { student, academy, studentFileId } / 실패: Error(code: "BAD_CODE" | ...)
-export async function loginStudent(code, meta) {
+// 포털 로그인: 코드 → fileId 대조 → 학생 또는 선생님(열람) 세션
+// 반환: {kind:"student", student, academy, ...} 또는 {kind:"teacher", teacher, academy, ...}
+// 실패: Error(code: "BAD_CODE" | ...)
+export async function loginPortal(code, meta) {
   const { fileId, aesKey } = await deriveStudentKeys(
     code,
     meta.saltStudent,
     meta.kdf.iterStudent
   );
-  if (!meta.students.includes(fileId)) {
-    const err = new Error("코드를 다시 확인해 주세요.");
-    err.code = "BAD_CODE";
-    throw err;
+  if (meta.students.includes(fileId)) {
+    const envelope = await fetchJSON(`data/s/${fileId}.json`);
+    const student = await decryptJSON(aesKey, envelope);
+    const academyKey = await importAesKeyB64(student.academy.key);
+    const academyEnv = await fetchJSON(`data/a/${student.academy.fileId}.json`);
+    const academy = await decryptJSON(academyKey, academyEnv);
+    // studentKey: 본인 전용 자료(퀴즈 분석 PDF 등) 복호화용
+    return { kind: "student", student, academy, academyKey, studentKey: aesKey, studentFileId: fileId };
   }
-  const envelope = await fetchJSON(`data/s/${fileId}.json`);
-  const student = await decryptJSON(aesKey, envelope);
-  const academyKey = await importAesKeyB64(student.academy.key);
-  const academyEnv = await fetchJSON(`data/a/${student.academy.fileId}.json`);
-  const academy = await decryptJSON(academyKey, academyEnv);
-  // studentKey: 본인 전용 자료(퀴즈 분석 PDF 등) 복호화용
-  return { student, academy, academyKey, studentKey: aesKey, studentFileId: fileId };
+  // 선생님 열람 코드: 학원 단위 집계 스냅샷(출석·점수 분포)이 든 blob
+  if ((meta.teachers || []).includes(fileId)) {
+    const envelope = await fetchJSON(`data/t/${fileId}.json`);
+    const teacher = await decryptJSON(aesKey, envelope);
+    const academyKey = await importAesKeyB64(teacher.academy.key);
+    const academyEnv = await fetchJSON(`data/a/${teacher.academy.fileId}.json`);
+    const academy = await decryptJSON(academyKey, academyEnv);
+    return { kind: "teacher", teacher, academy, academyKey };
+  }
+  const err = new Error("코드를 다시 확인해 주세요.");
+  err.code = "BAD_CODE";
+  throw err;
 }
 
 // 자료실 파일 복호화 → Blob

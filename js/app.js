@@ -1,7 +1,7 @@
-// app.js — 학생/학부모 포털 컨트롤러
+// app.js — 학생/학부모/선생님(열람) 포털 컨트롤러
 import {
   loadMeta,
-  loginStudent,
+  loginPortal,
   loadMaterial,
   sortWeeks,
   sortQuizzes,
@@ -12,7 +12,7 @@ import {
   ATTENDANCE,
 } from "./store.js";
 import { $, el, clear, toast, copyText, tabBar, setBusy, spinner } from "./ui.js";
-import { renderScoreChart } from "./chart.js";
+import { renderScoreChart, renderHistogram } from "./chart.js";
 
 // 자동 로그인 체크 → localStorage (탭을 닫아도 유지, 로그아웃 전까지)
 // 미체크 → sessionStorage (새로고침에는 유지, 탭을 닫으면 자동 해제)
@@ -140,9 +140,10 @@ async function tryLogin(code, isAuto, remember = false) {
     );
   }
   try {
-    session = await loginStudent(code, meta);
+    session = await loginPortal(code, meta);
     if (!isAuto) storeCode(code, remember);
-    renderDashboard();
+    if (session.kind === "teacher") renderTeacherDashboard();
+    else renderDashboard();
     return true;
   } catch (e) {
     if (e.code !== "BAD_CODE") {
@@ -510,4 +511,144 @@ function renderAttendance(container, week) {
     progCard.appendChild(el("p", { class: "empty", text: "이번 주 진도가 입력되지 않았습니다." }));
   }
   container.appendChild(progCard);
+}
+
+// ==================== 선생님(열람) 대시보드 ====================
+// 관리 권한 없음 — 소속 학원의 출석 현황·퀴즈 점수 분포(익명)·공지만 열람.
+
+function renderTeacherDashboard() {
+  const { teacher, academy } = session;
+  const weeks = sortWeeks(academy.weeks);
+  const cur = currentWeek(weeks);
+  let selectedWeekId = cur ? cur.id : weeks.length ? weeks[weeks.length - 1].id : null;
+
+  const root = el("div", { class: "container" });
+  root.appendChild(
+    el("div", { class: "portal-header" }, [
+      el("div", { class: "who" }, [
+        el("div", { class: "name", text: teacher.name || `${academy.name} 선생님` }),
+        el("div", { class: "academy", text: `${academy.name} · 열람 전용` }),
+      ]),
+      el("button", { class: "btn btn-small", text: "로그아웃", onclick: logout }),
+    ])
+  );
+
+  const content = el("div", { id: "tab-content" });
+  const renderTab = (id) => {
+    clear(content);
+    if (id === "att") renderTeacherAttendance(content, weeks, selectedWeekId, (wid) => {
+      selectedWeekId = wid;
+      renderTab("att");
+    });
+    else if (id === "dist") renderTeacherQuizDist(content);
+    else if (id === "notice") renderNotices(content);
+  };
+  const tabs = tabBar(
+    root,
+    [
+      { id: "att", label: "출석 현황" },
+      { id: "dist", label: "퀴즈 분포" },
+      { id: "notice", label: "공지사항" },
+    ],
+    renderTab
+  );
+  root.appendChild(content);
+  clear(app).appendChild(root);
+  tabs.select("att");
+}
+
+// ---------- 출석 현황 (학생×수업일 표) ----------
+function renderTeacherAttendance(container, weeks, selectedWeekId, onWeekChange) {
+  const { teacher } = session;
+  const card = el("div", { class: "card" }, [el("h2", { text: "출석 현황" })]);
+  if (!weeks.length) {
+    card.appendChild(el("p", { class: "empty", text: "등록된 주차가 없습니다." }));
+    container.appendChild(card);
+    return;
+  }
+  const weekSel = el("select", { "aria-label": "주차 선택" });
+  for (const w of weeks) {
+    weekSel.appendChild(el("option", { value: w.id, text: w.label, selected: w.id === selectedWeekId }));
+  }
+  weekSel.addEventListener("change", () => onWeekChange(weekSel.value));
+  card.appendChild(el("div", { class: "week-select-row" }, [weekSel]));
+
+  const week = weeks.find((w) => w.id === selectedWeekId) || weeks[weeks.length - 1];
+  const rows = teacher.snapshot?.attendance?.[week.id] || [];
+  const sessions = week.sessions || [];
+  if (!sessions.length || !rows.length) {
+    card.appendChild(el("p", { class: "empty", text: "이 주차의 출석 기록이 없습니다." }));
+  } else {
+    const tbl = el("table", { class: "grid" });
+    tbl.appendChild(
+      el("tr", {}, [
+        el("th", { class: "name-cell", text: "이름" }),
+        ...sessions.map((d) => el("th", { text: d.slice(5).replace("-", "/") })),
+      ])
+    );
+    for (const r of rows) {
+      tbl.appendChild(
+        el("tr", {}, [
+          el("td", { class: "name-cell", text: r.name }),
+          ...sessions.map((d) => {
+            const info = ATTENDANCE[r.byDate?.[d]];
+            return el("td", {}, [
+              info
+                ? el("span", { class: `t-chip ${info.cls}`, text: info.label })
+                : el("span", { class: "t-dash", text: "–" }),
+            ]);
+          }),
+        ])
+      );
+    }
+    card.appendChild(el("div", { class: "table-wrap" }, [tbl]));
+  }
+  if (week.progress) {
+    card.appendChild(el("p", { class: "hint", text: `진도 · ${week.progress}` }));
+  }
+  container.appendChild(card);
+}
+
+// ---------- 퀴즈 점수 분포 (익명 히스토그램) ----------
+function renderTeacherQuizDist(container) {
+  const { teacher, academy } = session;
+  const quizzes = sortQuizzes(academy.quizzes, academy.weeks);
+  if (!quizzes.length) {
+    container.appendChild(
+      el("div", { class: "card" }, [
+        el("h2", { text: "퀴즈 점수 분포" }),
+        el("p", { class: "empty", text: "아직 등록된 퀴즈가 없습니다." }),
+      ])
+    );
+    return;
+  }
+  container.appendChild(
+    el("p", { class: "hint", text: "점수는 학생 이름 없이 분포로만 표시됩니다." })
+  );
+  for (const q of [...quizzes].reverse()) {
+    const scores = teacher.snapshot?.quizScores?.[q.id] || [];
+    const card = el("div", { class: "card" }, [
+      el("div", { class: "unit-title" }, [
+        el("span", { text: q.unit }),
+        el("span", { class: "unit-week", text: shortLabel(weekLabelOf(academy.weeks, q.weekId)) }),
+      ]),
+    ]);
+    if (scores.length) {
+      const avg = Math.round((scores.reduce((a, b) => a + b, 0) / scores.length) * 10) / 10;
+      card.appendChild(
+        el("p", {
+          class: "hint",
+          text:
+            `학원 평균 ${avg}점 · 최고 ${Math.max(...scores)}점 · 최저 ${Math.min(...scores)}점 · 응시 ${scores.length}명 (만점 ${q.max || 100}점)` +
+            (q.stats?.avg != null ? ` · 전체 평균 ${q.stats.avg}점` : ""),
+        })
+      );
+      const histBox = el("div");
+      card.appendChild(histBox);
+      renderHistogram(histBox, { scores, max: q.max || 100 });
+    } else {
+      card.appendChild(el("p", { class: "empty", text: "입력된 점수가 없습니다." }));
+    }
+    container.appendChild(card);
+  }
 }

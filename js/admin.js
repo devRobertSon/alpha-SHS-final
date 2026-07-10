@@ -1,6 +1,7 @@
 // admin.js — 선생님 관리 페이지 컨트롤러
 // 구조: 마스터 비밀번호 로그인 → 전체 데이터 복호화(인메모리 모델) → 편집 → 발행(재암호화)
 import {
+  FORMAT_VERSION,
   deriveMasterKey,
   deriveStudentKeys,
   decryptJSON,
@@ -724,6 +725,59 @@ function renderStudentsTab(container) {
     ])
   );
 
+  // ---- 선생님 열람 코드 (학원별, 관리 권한 없음 — 출석·공지·점수 분포만 열람) ----
+  card.appendChild(el("h3", { text: "선생님 열람 코드", style: "font-size:15px;margin-top:18px" }));
+  card.appendChild(
+    el("p", {
+      class: "hint",
+      text: "이 코드로 학생 포털에 로그인하면 해당 학원의 출석 현황, 공지, 퀴즈 점수 분포(이름 없음)만 볼 수 있습니다. 편집은 불가능합니다.",
+    })
+  );
+  S.roster.teachers = S.roster.teachers || [];
+  for (const a of S.roster.academies) {
+    const viewers = S.roster.teachers.filter((t) => t.academyFileId === a.fileId);
+    for (const t of viewers) {
+      card.appendChild(
+        el("div", { class: "student-row" }, [
+          el("span", { class: "s-name", text: t.name }),
+          el("span", { class: "code-pill", text: t.code }),
+          el("span", { class: "s-actions" }, [
+            el("button", {
+              class: "btn btn-small",
+              text: "카드 인쇄",
+              onclick: () => printCodeCards([{ name: t.name, code: t.code, academyName: a.name }], S.meta.site.title, S.roster.siteURL),
+            }),
+            el("button", { class: "btn btn-small", text: "코드 재발급", onclick: () => reissueTeacher(t) }),
+            el("button", { class: "btn btn-small btn-danger", text: "삭제", onclick: () => deleteTeacher(t) }),
+          ]),
+        ])
+      );
+    }
+    card.appendChild(
+      el("div", { class: "toolbar" }, [
+        el("button", {
+          class: "btn btn-small",
+          text: `+ ${a.name} 선생님 코드 발급`,
+          onclick: async () => {
+            const code = generateCode();
+            const { fileId, aesKey } = await deriveStudentKeys(code, S.meta.saltStudent, S.meta.kdf.iterStudent);
+            S.roster.teachers.push({
+              code,
+              name: `${a.name} 선생님`,
+              fileId,
+              encKey: await exportAesKeyB64(aesKey),
+              academyFileId: a.fileId,
+              active: true,
+            });
+            markRoster();
+            toast(`발급되었습니다: ${code} — '발행'해야 사용할 수 있습니다.`, "ok");
+            renderTab();
+          },
+        }),
+      ])
+    );
+  }
+
   card.appendChild(
     el("div", { class: "toolbar", style: "margin-top:14px" }, [
       el("button", {
@@ -847,6 +901,49 @@ async function deleteStudent(st) {
     await rotateAcademyKey(academyFileId);
     markRoster();
     toast(`${st.name} 학생이 삭제되었습니다. '발행'해야 사이트에 반영됩니다.`, "ok");
+  } catch (e) {
+    console.error(e);
+    toast("삭제 처리 중 오류: " + e.message, "error");
+  }
+  renderTab();
+}
+
+// 선생님 열람 코드 재발급 (데이터는 발행 때마다 재생성되므로 코드/키만 교체)
+async function reissueTeacher(t) {
+  const ok = await confirmModal({
+    title: "선생님 코드 재발급",
+    body: `${t.name}의 열람 코드를 새로 만듭니다. 기존 코드는 더 이상 사용할 수 없습니다.\n\n주의: ZIP 수동 업로드가 아닌 'GitHub에 발행(자동 커밋)'을 사용해야 이전 파일이 서버에서 삭제됩니다.`,
+    okText: "재발급",
+  });
+  if (!ok) return;
+  const oldFileId = t.fileId;
+  const code = generateCode();
+  const { fileId, aesKey } = await deriveStudentKeys(code, S.meta.saltStudent, S.meta.kdf.iterStudent);
+  t.code = code;
+  t.fileId = fileId;
+  t.encKey = await exportAesKeyB64(aesKey);
+  S.pendingDeletes.add(`data/t/${oldFileId}.json`);
+  markRoster();
+  toast(`새 코드: ${code} — '발행'해야 적용됩니다.`, "ok");
+  renderTab();
+}
+
+// 선생님 열람 코드 삭제: 학원 키를 알고 있으므로 학원 키 교체 포함
+async function deleteTeacher(t) {
+  const ok = await confirmModal({
+    title: "선생님 코드 삭제",
+    body: `${t.name}의 열람 코드를 삭제합니다. 이 코드는 소속 학원의 공지·자료 암호화 키를 알고 있으므로, 보안을 위해 학원 키가 교체됩니다(자료 재암호화).\n\n발행해야 적용되며, 'GitHub에 발행(자동 커밋)'을 사용해야 이전 파일이 삭제됩니다.`,
+    okText: "삭제",
+    danger: true,
+  });
+  if (!ok) return;
+  setBusy(contentEl, "학원 키를 교체하고 자료를 재암호화하는 중…");
+  try {
+    S.pendingDeletes.add(`data/t/${t.fileId}.json`);
+    S.roster.teachers = S.roster.teachers.filter((x) => x.fileId !== t.fileId);
+    await rotateAcademyKey(t.academyFileId);
+    markRoster();
+    toast(`${t.name} 코드가 삭제되었습니다. '발행'해야 반영됩니다.`, "ok");
   } catch (e) {
     console.error(e);
     toast("삭제 처리 중 오류: " + e.message, "error");
@@ -1960,6 +2057,27 @@ function clearDirty() {
   S.zipDownloaded = false;
 }
 
+// 선생님 열람용 집계 스냅샷: 출석(이름 포함) + 퀴즈 점수 목록(이름 없이 내림차순 = 익명 분포)
+function buildTeacherSnapshot(academyFileId) {
+  const aBlob = S.academies.get(academyFileId);
+  const students = activeStudentsOf(academyFileId);
+  const attendance = {};
+  for (const w of aBlob.weeks || []) {
+    attendance[w.id] = students.map((st) => ({
+      name: st.name,
+      byDate: { ...(S.students.get(st.fileId)?.weeks?.[w.id]?.attendance || {}) },
+    }));
+  }
+  const quizScores = {};
+  for (const q of aBlob.quizzes || []) {
+    quizScores[q.id] = students
+      .map((st) => S.students.get(st.fileId)?.quizzes?.[q.id])
+      .filter((v) => v != null)
+      .sort((a, b) => b - a);
+  }
+  return { attendance, quizScores };
+}
+
 // mode: "api" → 변경분만(base64) + 삭제 목록 / "zip" → 전체 파일(bytes)
 async function buildPublishFiles(mode) {
   const enc = new TextEncoder();
@@ -1983,6 +2101,7 @@ async function buildPublishFiles(mode) {
   // 3) meta 갱신
   S.meta.students = S.roster.students.map((s) => s.fileId);
   S.meta.academies = S.roster.academies.map((a) => a.fileId);
+  S.meta.teachers = (S.roster.teachers || []).map((t) => t.fileId);
   S.meta.publishedAt = new Date().toISOString();
 
   const files = [];
@@ -2006,6 +2125,21 @@ async function buildPublishFiles(mode) {
     const key = await importAesKeyB64(st.encKey);
     pushJSON(`data/s/${st.fileId}.json`, await encryptJSON(key, S.students.get(st.fileId)));
   }
+  // 선생님 열람 파일: 출석·점수 분포 스냅샷이 매 발행마다 최신으로 재생성되므로 항상 포함
+  for (const t of S.roster.teachers || []) {
+    const aEntry = S.roster.academies.find((a) => a.fileId === t.academyFileId);
+    if (!aEntry) continue;
+    const key = await importAesKeyB64(t.encKey);
+    const blob = {
+      v: FORMAT_VERSION,
+      type: "teacher",
+      name: t.name,
+      academy: { fileId: aEntry.fileId, key: aEntry.key, name: aEntry.name },
+      snapshot: buildTeacherSnapshot(t.academyFileId),
+    };
+    pushJSON(`data/t/${t.fileId}.json`, await encryptJSON(key, blob));
+  }
+
   for (const [path, up] of S.pendingUploads) {
     // 학생 대상(개인 분석 PDF) 또는 학원 대상(자료실) — 소유자를 못 찾으면
     // 조용히 건너뛰지 않고 발행을 중단한다 (무음 데이터 손실 방지)

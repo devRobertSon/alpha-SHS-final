@@ -305,3 +305,23 @@ li.hw-done .hw-text {
   white-space: pre-wrap;
   font-size: 15px;
 }
+
+/* ---------- 선생님(열람) 대시보드 ---------- */
+.t-chip {
+  display: inline-block;
+  min-width: 40px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 600;
+  border: 1px solid transparent;
+}
+.t-chip.att-p { background: #effaef; color: var(--good-text); border-color: #cde9cd; }
+.t-chip.att-l { background: var(--warn-wash); color: #7a5b00; border-color: #ecd9a6; }
+.t-chip.att-a { background: #fdecec; color: var(--bad); border-color: #f3c9c9; }
+.t-chip.att-m { background: var(--accent-wash); color: var(--accent-strong); border-color: #c8ddf5; }
+.t-chip.att-e { background: #e0f4f4; color: #0b6e6e; border-color: #bde3e3; }
+.t-chip.att-x { background: #efeeea; color: #52514e; border-color: #d8d6cf; }
+.t-dash {
+  color: var(--muted);
+}
