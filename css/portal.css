@@ -325,3 +325,10 @@ li.hw-done .hw-text {
 .t-dash {
   color: var(--muted);
 }
+.t-avg-row td {
+  background: var(--accent-wash);
+  font-weight: 700;
+}
+.t-avg-row td.name-cell {
+  background: var(--accent-wash);
+}

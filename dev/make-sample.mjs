@@ -298,19 +298,16 @@ async function main() {
           byDate: { ...(s.weeksData[w.id]?.attendance || {}) },
         }));
       }
-      const snapQuizScores = {};
-      for (const q of A.quizzes) {
-        snapQuizScores[q.id] = academyStudents
-          .map((s) => s.quizScores[q.id])
-          .filter((v) => v != null)
-          .sort((a, b) => b - a);
-      }
+      const scores = academyStudents.map((s) => ({
+        name: s.name,
+        byQuiz: { ...s.quizScores },
+      }));
       const teacherBlob = {
         v: FORMAT_VERSION,
         type: "teacher",
         name: `${A.name} 선생님`,
         academy: { fileId: aEntry.fileId, key: aEntry.key, name: aEntry.name },
-        snapshot: { attendance, quizScores: snapQuizScores },
+        snapshot: { attendance, scores },
       };
       await writeFile(
         path.join(root, `data/t/${fileId}.json`),

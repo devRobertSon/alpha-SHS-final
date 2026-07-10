@@ -730,7 +730,7 @@ function renderStudentsTab(container) {
   card.appendChild(
     el("p", {
       class: "hint",
-      text: "이 코드로 학생 포털에 로그인하면 해당 학원의 출석 현황, 공지, 퀴즈 점수 분포(이름 없음)만 볼 수 있습니다. 편집은 불가능합니다.",
+      text: "이 코드로 학생 포털에 로그인하면 해당 학원의 출석 현황, 학생별 성적표, 퀴즈 점수 분포, 공지를 볼 수 있습니다. 편집은 불가능합니다.",
     })
   );
   S.roster.teachers = S.roster.teachers || [];
@@ -2057,7 +2057,7 @@ function clearDirty() {
   S.zipDownloaded = false;
 }
 
-// 선생님 열람용 집계 스냅샷: 출석(이름 포함) + 퀴즈 점수 목록(이름 없이 내림차순 = 익명 분포)
+// 선생님 열람용 집계 스냅샷: 출석표 + 학생별 성적표 (둘 다 이 학원 학생 이름 포함)
 function buildTeacherSnapshot(academyFileId) {
   const aBlob = S.academies.get(academyFileId);
   const students = activeStudentsOf(academyFileId);
@@ -2068,14 +2068,12 @@ function buildTeacherSnapshot(academyFileId) {
       byDate: { ...(S.students.get(st.fileId)?.weeks?.[w.id]?.attendance || {}) },
     }));
   }
-  const quizScores = {};
-  for (const q of aBlob.quizzes || []) {
-    quizScores[q.id] = students
-      .map((st) => S.students.get(st.fileId)?.quizzes?.[q.id])
-      .filter((v) => v != null)
-      .sort((a, b) => b - a);
-  }
-  return { attendance, quizScores };
+  // 학생별 성적: 성적표(이름×단원)와 분포 히스토그램이 같은 데이터를 사용
+  const scores = students.map((st) => ({
+    name: st.name,
+    byQuiz: { ...(S.students.get(st.fileId)?.quizzes || {}) },
+  }));
+  return { attendance, scores };
 }
 
 // mode: "api" → 변경분만(base64) + 삭제 목록 / "zip" → 전체 파일(bytes)

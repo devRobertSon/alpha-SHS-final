@@ -540,6 +540,7 @@ function renderTeacherDashboard() {
       selectedWeekId = wid;
       renderTab("att");
     });
+    else if (id === "scores") renderTeacherScores(content);
     else if (id === "dist") renderTeacherQuizDist(content);
     else if (id === "notice") renderNotices(content);
   };
@@ -547,6 +548,7 @@ function renderTeacherDashboard() {
     root,
     [
       { id: "att", label: "출석 현황" },
+      { id: "scores", label: "학생별 성적" },
       { id: "dist", label: "퀴즈 분포" },
       { id: "notice", label: "공지사항" },
     ],
@@ -609,9 +611,63 @@ function renderTeacherAttendance(container, weeks, selectedWeekId, onWeekChange)
   container.appendChild(card);
 }
 
+// ---------- 학생별 성적 (이름×단원 표) ----------
+function renderTeacherScores(container) {
+  const { teacher, academy } = session;
+  const quizzes = sortQuizzes(academy.quizzes, academy.weeks);
+  const rows = teacher.snapshot?.scores || [];
+  const card = el("div", { class: "card" }, [el("h2", { text: "학생별 성적" })]);
+  if (!quizzes.length || !rows.length) {
+    card.appendChild(el("p", { class: "empty", text: "아직 등록된 퀴즈가 없습니다." }));
+    container.appendChild(card);
+    return;
+  }
+  const tbl = el("table", { class: "grid" });
+  tbl.appendChild(
+    el("tr", {}, [
+      el("th", { class: "name-cell", text: "이름" }),
+      ...quizzes.map((q) => el("th", { text: `${q.unit} (${q.max || 100})` })),
+    ])
+  );
+  for (const r of rows) {
+    tbl.appendChild(
+      el("tr", {}, [
+        el("td", { class: "name-cell", text: r.name }),
+        ...quizzes.map((q) => {
+          const v = r.byQuiz?.[q.id];
+          return el("td", { class: "num", text: v != null ? String(v) : "–" });
+        }),
+      ])
+    );
+  }
+  // 학원 평균 행
+  const avgRow = el("tr", { class: "t-avg-row" }, [el("td", { class: "name-cell", text: "학원 평균" })]);
+  for (const q of quizzes) {
+    const vals = rows.map((r) => r.byQuiz?.[q.id]).filter((v) => v != null);
+    avgRow.appendChild(
+      el("td", {
+        class: "num",
+        text: vals.length
+          ? String(Math.round((vals.reduce((a, b) => a + b, 0) / vals.length) * 10) / 10)
+          : "–",
+      })
+    );
+  }
+  tbl.appendChild(avgRow);
+  card.appendChild(el("div", { class: "table-wrap" }, [tbl]));
+  container.appendChild(card);
+}
+
+// 스냅샷에서 특정 퀴즈의 점수 배열 (분포용)
+function quizScoreValues(quizId) {
+  return (session.teacher.snapshot?.scores || [])
+    .map((r) => r.byQuiz?.[quizId])
+    .filter((v) => v != null);
+}
+
 // ---------- 퀴즈 점수 분포 (익명 히스토그램) ----------
 function renderTeacherQuizDist(container) {
-  const { teacher, academy } = session;
+  const { academy } = session;
   const quizzes = sortQuizzes(academy.quizzes, academy.weeks);
   if (!quizzes.length) {
     container.appendChild(
@@ -622,11 +678,8 @@ function renderTeacherQuizDist(container) {
     );
     return;
   }
-  container.appendChild(
-    el("p", { class: "hint", text: "점수는 학생 이름 없이 분포로만 표시됩니다." })
-  );
   for (const q of [...quizzes].reverse()) {
-    const scores = teacher.snapshot?.quizScores?.[q.id] || [];
+    const scores = quizScoreValues(q.id);
     const card = el("div", { class: "card" }, [
       el("div", { class: "unit-title" }, [
         el("span", { text: q.unit }),
