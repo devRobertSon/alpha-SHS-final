@@ -332,3 +332,33 @@ li.hw-done .hw-text {
 .t-avg-row td.name-cell {
   background: var(--accent-wash);
 }
+.hw-yes {
+  color: var(--good-text);
+  font-weight: 700;
+}
+.t-report {
+  border-top: 1px solid var(--hairline);
+  padding: 10px 0;
+}
+.t-report:first-of-type {
+  border-top: none;
+}
+.t-report-head {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-bottom: 4px;
+}
+.t-report-name {
+  font-weight: 700;
+  font-size: 15px;
+}
+.t-pdf-chip {
+  background: var(--page);
+  border: 1px solid var(--hairline);
+  border-radius: 999px;
+  padding: 1px 10px;
+  font-size: 12px;
+  color: var(--ink-2);
+}

@@ -540,16 +540,23 @@ function renderTeacherDashboard() {
       selectedWeekId = wid;
       renderTab("att");
     });
+    else if (id === "hw") renderTeacherHomework(content, weeks, selectedWeekId, (wid) => {
+      selectedWeekId = wid;
+      renderTab("hw");
+    });
     else if (id === "scores") renderTeacherScores(content);
     else if (id === "dist") renderTeacherQuizDist(content);
+    else if (id === "reports") renderTeacherReports(content);
     else if (id === "notice") renderNotices(content);
   };
   const tabs = tabBar(
     root,
     [
       { id: "att", label: "출석 현황" },
+      { id: "hw", label: "숙제" },
       { id: "scores", label: "학생별 성적" },
       { id: "dist", label: "퀴즈 분포" },
+      { id: "reports", label: "리포트" },
       { id: "notice", label: "공지사항" },
     ],
     renderTab
@@ -609,6 +616,104 @@ function renderTeacherAttendance(container, weeks, selectedWeekId, onWeekChange)
     card.appendChild(el("p", { class: "hint", text: `진도 · ${week.progress}` }));
   }
   container.appendChild(card);
+}
+
+// ---------- 숙제 체크 현황 (학생×항목 표) ----------
+function renderTeacherHomework(container, weeks, selectedWeekId, onWeekChange) {
+  const { teacher } = session;
+  const card = el("div", { class: "card" }, [el("h2", { text: "숙제 체크 현황" })]);
+  if (!weeks.length) {
+    card.appendChild(el("p", { class: "empty", text: "등록된 주차가 없습니다." }));
+    container.appendChild(card);
+    return;
+  }
+  const weekSel = el("select", { "aria-label": "주차 선택" });
+  for (const w of weeks) {
+    weekSel.appendChild(el("option", { value: w.id, text: w.label, selected: w.id === selectedWeekId }));
+  }
+  weekSel.addEventListener("change", () => onWeekChange(weekSel.value));
+  card.appendChild(el("div", { class: "week-select-row" }, [weekSel]));
+
+  const week = weeks.find((w) => w.id === selectedWeekId) || weeks[weeks.length - 1];
+  const items = week.homework || [];
+  const rows = teacher.snapshot?.homework?.[week.id] || [];
+  if (!items.length || !rows.length) {
+    card.appendChild(el("p", { class: "empty", text: "이 주차에 등록된 숙제가 없습니다." }));
+  } else {
+    card.appendChild(
+      el("ol", { class: "rd-list", style: "font-size:14px;padding-left:20px" },
+        items.map((it) => el("li", { text: it.text })))
+    );
+    const tbl = el("table", { class: "grid" });
+    tbl.appendChild(
+      el("tr", {}, [
+        el("th", { class: "name-cell", text: "이름" }),
+        ...items.map((_, i) => el("th", { text: `${i + 1}번` })),
+        el("th", { text: "완료율" }),
+      ])
+    );
+    for (const r of rows) {
+      const done = items.filter((it) => r.byItem?.[it.id]).length;
+      tbl.appendChild(
+        el("tr", {}, [
+          el("td", { class: "name-cell", text: r.name }),
+          ...items.map((it) =>
+            el("td", {}, [
+              r.byItem?.[it.id]
+                ? el("span", { class: "hw-yes", text: "✓" })
+                : el("span", { class: "t-dash", text: "–" }),
+            ])
+          ),
+          el("td", { class: "num", text: `${Math.round((done / items.length) * 100)}%` }),
+        ])
+      );
+    }
+    card.appendChild(el("div", { class: "table-wrap" }, [tbl]));
+  }
+  container.appendChild(card);
+}
+
+// ---------- 개별 리포트 열람 (전달사항 + PDF 유무) ----------
+function renderTeacherReports(container) {
+  const { teacher, academy } = session;
+  const quizzes = sortQuizzes(academy.quizzes, academy.weeks);
+  const reports = teacher.snapshot?.reports || {};
+  const withReports = [...quizzes].reverse().filter((q) => (reports[q.id] || []).length);
+  if (!withReports.length) {
+    container.appendChild(
+      el("div", { class: "card" }, [
+        el("h2", { text: "개별 리포트" }),
+        el("p", { class: "empty", text: "아직 작성된 리포트가 없습니다." }),
+      ])
+    );
+    return;
+  }
+  container.appendChild(
+    el("p", {
+      class: "hint",
+      text: "학생별 전달사항 전문과 분석 PDF 첨부 여부입니다. (PDF 원본은 관리 페이지에서 발행한 파일입니다)",
+    })
+  );
+  for (const q of withReports) {
+    const card = el("div", { class: "card" }, [
+      el("div", { class: "unit-title" }, [
+        el("span", { text: q.unit }),
+        el("span", { class: "unit-week", text: shortLabel(weekLabelOf(academy.weeks, q.weekId)) }),
+      ]),
+    ]);
+    for (const r of reports[q.id]) {
+      card.appendChild(
+        el("div", { class: "t-report" }, [
+          el("div", { class: "t-report-head" }, [
+            el("span", { class: "t-report-name", text: r.name }),
+            r.pdfName ? el("span", { class: "t-pdf-chip", text: `📎 ${r.pdfName}` }) : null,
+          ]),
+          r.note ? el("div", { class: "report-body", style: "font-size:14px", text: r.note }) : null,
+        ])
+      );
+    }
+    container.appendChild(card);
+  }
 }
 
 // ---------- 학생별 성적 (이름×단원 표) ----------

@@ -275,7 +275,7 @@ async function main() {
         path.join(root, `data/s/${fileId}.json`),
         JSON.stringify(await encryptJSON(aesKey, studentBlob), null, 1)
       );
-      academyStudents.push({ name, weeksData, quizScores });
+      academyStudents.push({ name, weeksData, quizScores, quizReports });
     }
 
     // 선생님 열람 코드 + 스냅샷 (admin buildTeacherSnapshot과 동일 규칙)
@@ -302,12 +302,33 @@ async function main() {
         name: s.name,
         byQuiz: { ...s.quizScores },
       }));
+      const homework = {};
+      for (const w of A.weeks) {
+        homework[w.id] = academyStudents.map((s) => ({
+          name: s.name,
+          byItem: { ...(s.weeksData[w.id]?.homework || {}) },
+        }));
+      }
+      const reports = {};
+      for (const q of A.quizzes) {
+        const rows = [];
+        for (const s of academyStudents) {
+          const rep = s.quizReports[q.id];
+          if (!rep || (!rep.note && !rep.pdf)) continue;
+          rows.push({
+            name: s.name,
+            ...(rep.note ? { note: rep.note } : {}),
+            ...(rep.pdf ? { pdfName: rep.pdf.origName } : {}),
+          });
+        }
+        if (rows.length) reports[q.id] = rows;
+      }
       const teacherBlob = {
         v: FORMAT_VERSION,
         type: "teacher",
         name: `${A.name} 선생님`,
         academy: { fileId: aEntry.fileId, key: aEntry.key, name: aEntry.name },
-        snapshot: { attendance, scores },
+        snapshot: { attendance, scores, homework, reports },
       };
       await writeFile(
         path.join(root, `data/t/${fileId}.json`),

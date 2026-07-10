@@ -730,7 +730,7 @@ function renderStudentsTab(container) {
   card.appendChild(
     el("p", {
       class: "hint",
-      text: "이 코드로 학생 포털에 로그인하면 해당 학원의 출석 현황, 학생별 성적표, 퀴즈 점수 분포, 공지를 볼 수 있습니다. 편집은 불가능합니다.",
+      text: "이 코드로 학생 포털에 로그인하면 해당 학원의 출석 현황, 숙제 체크, 학생별 성적표, 퀴즈 점수 분포, 개별 리포트(전달사항+PDF 첨부 여부), 공지를 볼 수 있습니다. 편집은 불가능합니다.",
     })
   );
   S.roster.teachers = S.roster.teachers || [];
@@ -2073,7 +2073,30 @@ function buildTeacherSnapshot(academyFileId) {
     name: st.name,
     byQuiz: { ...(S.students.get(st.fileId)?.quizzes || {}) },
   }));
-  return { attendance, scores };
+  // 숙제 체크 상태 (주차별 학생×항목)
+  const homework = {};
+  for (const w of aBlob.weeks || []) {
+    homework[w.id] = students.map((st) => ({
+      name: st.name,
+      byItem: { ...(S.students.get(st.fileId)?.weeks?.[w.id]?.homework || {}) },
+    }));
+  }
+  // 개별 리포트: 전달사항 텍스트 + 분석 PDF 유무(파일명만 — 파일 자체는 학생 키 암호화라 포함하지 않음)
+  const reports = {};
+  for (const q of aBlob.quizzes || []) {
+    const rows = [];
+    for (const st of students) {
+      const rep = S.students.get(st.fileId)?.quizReports?.[q.id];
+      if (!rep || (!rep.note && !rep.pdf)) continue;
+      rows.push({
+        name: st.name,
+        ...(rep.note ? { note: rep.note } : {}),
+        ...(rep.pdf ? { pdfName: rep.pdf.origName } : {}),
+      });
+    }
+    if (rows.length) reports[q.id] = rows;
+  }
+  return { attendance, scores, homework, reports };
 }
 
 // mode: "api" → 변경분만(base64) + 삭제 목록 / "zip" → 전체 파일(bytes)
