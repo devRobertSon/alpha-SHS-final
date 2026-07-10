@@ -62,9 +62,10 @@ const ACADEMIES = [
       { id: "2026-W26", label: "6월 4주차 (6/22~6/28)", sessions: ["2026-06-24", "2026-06-27"] },
       { id: "2026-W27", label: "7월 1주차 (6/29~7/5)", sessions: ["2026-07-01", "2026-07-04"] },
     ],
+    // 자유낙하·몰 개념은 한빛학원과 같은 단원명 → 전체 평균이 두 학원 합산으로 계산됨
     quizzes: [
-      { id: "qb1", unit: "물리: 속도와 가속도", weekId: "2026-W25", max: 100, scores: [70, 95, 84, 88, null] },
-      { id: "qb2", unit: "화학: 원소와 주기율표", weekId: "2026-W26", max: 100, scores: [75, 92, 80, 91, 85] },
+      { id: "qb1", unit: "물리: 자유낙하", weekId: "2026-W25", max: 100, scores: [70, 95, 84, 88, null] },
+      { id: "qb2", unit: "화학: 몰 개념", weekId: "2026-W26", max: 100, scores: [75, 92, 80, 91, 85] },
       { id: "qb3", unit: "화학: 화학 결합", weekId: "2026-W27", max: 100, scores: [81, 96, 85, 94, 89] },
     ],
     reportsFor: { pdfAndNote: "qb3", noteOnly: "qb2" },
@@ -117,6 +118,26 @@ async function main() {
   const rosterStudents = [];
   const sampleLines = [];
 
+  // 단원명이 같은 퀴즈는 전 학원 학생을 합쳐 전체 평균 계산 (admin recomputeStats와 동일 규칙)
+  const unitPool = new Map();
+  for (const A of ACADEMIES) {
+    for (const q of A.quizzes) {
+      const key = q.unit.trim().replace(/\s+/g, " ");
+      const arr = unitPool.get(key) || [];
+      arr.push(...q.scores.filter((s) => s != null));
+      unitPool.set(key, arr);
+    }
+  }
+  const statsFor = (unit) => {
+    const scores = unitPool.get(unit.trim().replace(/\s+/g, " ")) || [];
+    return scores.length
+      ? {
+          avg: Math.round((scores.reduce((a, b) => a + b, 0) / scores.length) * 10) / 10,
+          count: scores.length,
+        }
+      : null;
+  };
+
   for (const A of ACADEMIES) {
     const aEntry = { fileId: randomHexId(16), key: randomKeyB64(), name: A.name };
     rosterAcademies.push(aEntry);
@@ -128,22 +149,14 @@ async function main() {
     const mPath = `data/m/${mId}.bin`;
     await writeFile(path.join(root, mPath), new Uint8Array(await encryptBytes(aKey, pdfBytes)));
 
-    // 학원 blob (단원 퀴즈: stats 포함)
-    const quizzes = A.quizzes.map((q) => {
-      const scores = q.scores.filter((s) => s != null);
-      return {
-        id: q.id,
-        unit: q.unit,
-        weekId: q.weekId,
-        max: q.max,
-        stats: scores.length
-          ? {
-              avg: Math.round((scores.reduce((a, b) => a + b, 0) / scores.length) * 10) / 10,
-              count: scores.length,
-            }
-          : null,
-      };
-    });
+    // 학원 blob (단원 퀴즈: stats = 두 학원 합산 전체 평균)
+    const quizzes = A.quizzes.map((q) => ({
+      id: q.id,
+      unit: q.unit,
+      weekId: q.weekId,
+      max: q.max,
+      stats: statsFor(q.unit),
+    }));
     const weeks = A.weeks.map((w, wi) => ({
       ...w,
       homework: HOMEWORK.slice(0, 2 + (wi % 2)),

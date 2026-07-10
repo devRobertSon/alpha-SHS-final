@@ -438,6 +438,10 @@ function editQuiz(quiz) {
   overlay.appendChild(
     el("div", { class: "modal" }, [
       el("h3", { text: quiz ? "퀴즈 관리" : "새 단원 퀴즈" }),
+      el("p", {
+        class: "hint",
+        text: "두 학원에서 같은 단원명으로 퀴즈를 만들면 전체 평균이 두 학원 학생을 합쳐 계산됩니다.",
+      }),
       el("label", { class: "field" }, [el("span", { text: "단원명" }), unitIn]),
       el("label", { class: "field" }, [el("span", { text: "응시 주차" }), weekSel]),
       el("label", { class: "field" }, [el("span", { text: "만점" }), maxIn]),
@@ -518,6 +522,7 @@ function deleteQuiz(quiz) {
     }
     if (touched) markStudent(st.fileId);
   }
+  recomputeStats();
   toast(`'${quiz.unit}' 퀴즈가 삭제되었습니다. '발행'해야 반영됩니다.`, "ok");
 }
 
@@ -1009,7 +1014,7 @@ function renderScoresTab(container) {
             }
           }
         }
-        recomputeStats(S.selAcademy);
+        recomputeStats();
         toast(`저장되었습니다 (${changed}명 변경). '발행'해야 사이트에 반영됩니다.`, "ok");
       },
     })
@@ -1017,22 +1022,38 @@ function renderScoresTab(container) {
   container.appendChild(card);
 }
 
-// 퀴즈별 반 평균/응시 인원 재계산 (학원 blob의 quizzes[].stats)
-function recomputeStats(academyFileId) {
-  const blob = S.academies.get(academyFileId);
-  if (!blob) return;
-  for (const q of blob.quizzes || []) {
-    const scores = activeStudentsOf(academyFileId)
-      .map((st) => S.students.get(st.fileId)?.quizzes?.[q.id])
-      .filter((v) => v != null);
-    const prev = JSON.stringify(q.stats || null);
-    q.stats = scores.length
-      ? {
-          avg: Math.round((scores.reduce((a, b) => a + b, 0) / scores.length) * 10) / 10,
-          count: scores.length,
-        }
-      : null;
-    if (JSON.stringify(q.stats) !== prev) markAcademy(academyFileId);
+// 퀴즈별 전체 평균/응시 인원 재계산 (quizzes[].stats)
+// 단원명이 같은 퀴즈는 **모든 학원의 학생을 합쳐** 전체 평균을 계산한다.
+// (학원 blob에는 합산된 평균·인원 숫자만 저장되므로 타 학원 개인 정보는 노출되지 않음)
+function recomputeStats() {
+  const norm = (s) => String(s || "").trim().replace(/\s+/g, " ");
+  // 단원명 → 전 학원 합산 점수 풀
+  const pool = new Map();
+  for (const a of S.roster.academies) {
+    const blob = S.academies.get(a.fileId);
+    for (const q of blob?.quizzes || []) {
+      const key = norm(q.unit);
+      const arr = pool.get(key) || [];
+      for (const st of activeStudentsOf(a.fileId)) {
+        const v = S.students.get(st.fileId)?.quizzes?.[q.id];
+        if (v != null) arr.push(v);
+      }
+      pool.set(key, arr);
+    }
+  }
+  for (const a of S.roster.academies) {
+    const blob = S.academies.get(a.fileId);
+    for (const q of blob?.quizzes || []) {
+      const scores = pool.get(norm(q.unit)) || [];
+      const prev = JSON.stringify(q.stats || null);
+      q.stats = scores.length
+        ? {
+            avg: Math.round((scores.reduce((x, y) => x + y, 0) / scores.length) * 10) / 10,
+            count: scores.length,
+          }
+        : null;
+      if (JSON.stringify(q.stats) !== prev) markAcademy(a.fileId);
+    }
   }
 }
 
@@ -1956,8 +1977,8 @@ async function buildPublishFiles(mode) {
     }
     blob.name = st.name;
   }
-  // 2) 반 평균 재계산
-  for (const a of S.roster.academies) recomputeStats(a.fileId);
+  // 2) 전체 평균 재계산 (단원명이 같은 퀴즈는 전 학원 학생 합산)
+  recomputeStats();
 
   // 3) meta 갱신
   S.meta.students = S.roster.students.map((s) => s.fileId);

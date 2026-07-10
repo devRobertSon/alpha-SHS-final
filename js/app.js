@@ -296,7 +296,7 @@ function renderQuiz(container) {
     card.appendChild(
       el("div", { class: "stat-row" }, [
         statTile("내 점수", String(myScores[latest.id]), `만점 ${latest.max || 100}`),
-        statTile("반 평균", latest.stats?.avg != null ? String(latest.stats.avg) : "–", ""),
+        statTile("전체 평균", latest.stats?.avg != null ? String(latest.stats.avg) : "–", "두 학원 합산"),
         statTile("응시 인원", latest.stats?.count != null ? `${latest.stats.count}명` : "–", ""),
       ])
     );
@@ -321,7 +321,7 @@ function renderQuiz(container) {
       el("th", { class: "name-cell", text: "단원" }),
       el("th", { text: "주차" }),
       el("th", { text: "내 점수" }),
-      el("th", { text: "반 평균" }),
+      el("th", { text: "전체 평균" }),
     ])
   );
   for (const q of [...quizzes].reverse()) {

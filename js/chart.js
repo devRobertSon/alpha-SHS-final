@@ -1,4 +1,4 @@
-// chart.js — 순수 SVG 꺾은선 그래프 (본인 점수 vs 반 평균)
+// chart.js — 순수 SVG 꺾은선 그래프 (본인 점수 vs 전체 평균 — 두 학원 합산)
 // 외부 라이브러리 없음. 색 + 선 스타일(실선/점선) 이중 부호화로 색각 이상에도 안전.
 import { el, clear } from "./ui.js";
 
@@ -92,12 +92,12 @@ export function renderScoreChart(container, { weeks, mine, avg, yMax = 100 }) {
     s += `<circle cx="${x(i)}" cy="${y(v)}" r="4" fill="${COLOR.mine}" stroke="${
       COLOR.surface
     }" stroke-width="2"><title>${escapeXML(weeks[i].label)} · 내 점수 ${v}${
-      avg[i] != null ? ` · 반 평균 ${avg[i]}` : ""
+      avg[i] != null ? ` · 전체 평균 ${avg[i]}` : ""
     }</title></circle>`;
   });
 
   const svg = el("div", { class: "chart-svg" });
-  svg.innerHTML = `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="주차별 내 점수와 반 평균 추이 그래프" style="width:100%;height:auto;display:block">${s}</svg>`;
+  svg.innerHTML = `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="내 점수와 전체 평균 추이 그래프" style="width:100%;height:auto;display:block">${s}</svg>`;
 
   // 터치/클릭 → 캡션 갱신 (주차 세로 구간 전체를 히트 영역으로)
   const caption = el("div", { class: "chart-caption", text: "점을 누르면 자세한 값이 표시됩니다." });
@@ -115,7 +115,7 @@ export function renderScoreChart(container, { weeks, mine, avg, yMax = 100 }) {
     const show = () => {
       const parts = [weeks[i].label];
       parts.push(mine[i] != null ? `내 점수 ${mine[i]}` : "내 점수 없음");
-      if (avg[i] != null) parts.push(`반 평균 ${avg[i]}`);
+      if (avg[i] != null) parts.push(`전체 평균 ${avg[i]}`);
       caption.textContent = parts.join(" · ");
     };
     r.addEventListener("click", show);
@@ -132,7 +132,7 @@ export function renderScoreChart(container, { weeks, mine, avg, yMax = 100 }) {
     ]),
     el("span", { class: "legend-item" }, [
       el("span", { class: "legend-swatch", html: legendLine(COLOR.avg, true) }),
-      "반 평균",
+      "전체 평균",
     ]),
   ]);
 

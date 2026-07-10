@@ -203,15 +203,16 @@ export function buildDirectorReport({
         else if (pq.missing.length) warn(`「${pq.q.unit}」 점수 미입력: ${pq.missing.join(", ")}`);
       }
 
-      // 단일 퀴즈면 통계 타일, 복수면 퀴즈별 요약 줄
+      // 단일 퀴즈면 통계 타일(학원 vs 전체), 복수면 퀴즈별 요약 줄
       if (perQuiz.length === 1 && perQuiz[0].scores.length) {
         const pq = perQuiz[0];
+        const g = pq.q.stats; // 전체 평균 (같은 단원명 퀴즈의 전 학원 합산)
         quizChildren.push(
           el("div", { class: "rd-stats" }, [
-            statTile("반 평균", `${pq.avg}점`),
+            statTile("학원 평균", `${pq.avg}점`, `응시 ${pq.scores.length}명`),
+            statTile("전체 평균", g?.avg != null ? `${g.avg}점` : "–", g ? `합산 ${g.count}명` : ""),
             statTile("최고", `${pq.hi}점`),
-            statTile("최저", `${pq.lo}점`),
-            statTile("응시", `${pq.scores.length}명`, `만점 ${pq.q.max || 100}점`),
+            statTile("최저", `${pq.lo}점`, `만점 ${pq.q.max || 100}점`),
           ])
         );
       }
@@ -239,18 +240,33 @@ export function buildDirectorReport({
 
       if (perQuiz.length > 1) {
         for (const pq of perQuiz.filter((x) => x.scores.length)) {
+          const g = pq.q.stats;
           quizChildren.push(
             el("p", {
               class: "rd-note",
-              text: `「${pq.q.unit}」 응시 ${pq.scores.length}명 · 평균 ${pq.avg}점 · 최고 ${pq.hi}점 · 최저 ${pq.lo}점 (만점 ${pq.q.max || 100}점)`,
+              text:
+                `「${pq.q.unit}」 응시 ${pq.scores.length}명 · 학원 평균 ${pq.avg}점` +
+                (g?.avg != null ? ` · 전체 평균 ${g.avg}점(합산 ${g.count}명)` : "") +
+                ` · 최고 ${pq.hi}점 · 최저 ${pq.lo}점 (만점 ${pq.q.max || 100}점)`,
             })
           );
         }
       }
 
-      // 자동 분석: 퀴즈별 문장 + 직전 단원 퀴즈 대비 평균 변화
+      // 자동 분석: 퀴즈별 문장 — 전체 평균 대비 + 직전 단원 퀴즈 대비
       const sentences = [];
       for (const pq of perQuiz.filter((x) => x.scores.length)) {
+        const g = pq.q.stats;
+        let vsAll = "";
+        if (g?.avg != null && g.count > pq.scores.length) {
+          const d = round1(pq.avg - g.avg);
+          vsAll =
+            d > 0
+              ? ` 두 학원 전체 평균(${g.avg}점)보다 ${d}점 높습니다.`
+              : d < 0
+                ? ` 두 학원 전체 평균(${g.avg}점)보다 ${Math.abs(d)}점 낮습니다.`
+                : ` 두 학원 전체 평균(${g.avg}점)과 같습니다.`;
+        }
         const i = trendData.findIndex((d) => d.label === pq.q.unit && d.avg === pq.avg);
         let trend = "";
         if (i > 0) {
@@ -258,13 +274,13 @@ export function buildDirectorReport({
           const diff = round1(pq.avg - prev.avg);
           trend =
             diff > 0
-              ? ` 직전 퀴즈 「${prev.label}」(평균 ${prev.avg}점)보다 ${diff}점 상승했습니다.`
+              ? ` 직전 퀴즈 「${prev.label}」(학원 평균 ${prev.avg}점)보다 ${diff}점 상승했습니다.`
               : diff < 0
-                ? ` 직전 퀴즈 「${prev.label}」(평균 ${prev.avg}점)보다 ${Math.abs(diff)}점 하락했습니다.`
-                : ` 직전 퀴즈 「${prev.label}」(평균 ${prev.avg}점)과 동일합니다.`;
+                ? ` 직전 퀴즈 「${prev.label}」(학원 평균 ${prev.avg}점)보다 ${Math.abs(diff)}점 하락했습니다.`
+                : ` 직전 퀴즈 「${prev.label}」(학원 평균 ${prev.avg}점)과 동일합니다.`;
         }
         sentences.push(
-          `「${pq.q.unit}」 응시 ${pq.scores.length}명 평균 ${pq.avg}점(만점 ${pq.q.max || 100}점), 최고 ${pq.hi}점 · 최저 ${pq.lo}점, 편차 ${pq.hi - pq.lo}점.${trend}`
+          `「${pq.q.unit}」 응시 ${pq.scores.length}명 학원 평균 ${pq.avg}점(만점 ${pq.q.max || 100}점), 최고 ${pq.hi}점 · 최저 ${pq.lo}점, 편차 ${pq.hi - pq.lo}점.${vsAll}${trend}`
         );
       }
       if (sentences.length) {
@@ -278,7 +294,7 @@ export function buildDirectorReport({
     }
 
     if (trendData.length >= 2) {
-      quizChildren.push(el("h3", { class: "rd-h3", text: "단원별 반 평균 추이" }));
+      quizChildren.push(el("h3", { class: "rd-h3", text: "단원별 학원 평균 추이" }));
       quizChildren.push(renderTrend(trendData, Math.max(100, ...allQuizzes.map((q) => q.max || 0))));
     }
     doc.appendChild(section(`지난 주 단원 퀴즈 결과 — ${P.label}`, quizChildren));
@@ -335,9 +351,9 @@ function statTile(label, value, sub) {
   ]);
 }
 
-// 퀴즈의 반 평균 (stats 우선, 없으면 직접 계산)
+// 퀴즈의 "학원 평균" — 이 학원 학생 점수로 직접 계산.
+// (quiz.stats는 두 학원 합산 전체 평균이므로 여기서 쓰지 않는다)
 function quizAvg(quiz, students) {
-  if (quiz.stats?.avg != null) return quiz.stats.avg;
   const scores = students.map((s) => s.blob.quizzes?.[quiz.id]).filter((v) => v != null);
   if (!scores.length) return null;
   return round1(scores.reduce((a, b) => a + b, 0) / scores.length);
