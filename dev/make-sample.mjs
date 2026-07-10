@@ -21,6 +21,7 @@ import {
   randomSaltB64,
   randomKeyB64,
   randomHexId,
+  importAesKeyB64,
 } from "../js/crypto.js";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -30,6 +31,7 @@ const MASTER_PASSWORD = "sample-master-password-123";
 const SITE_TITLE = "과학고 대비 학습 포털 (샘플)";
 
 // 전부 가상의 인물/학원입니다.
+// quizzes[].scores 는 students 배열과 같은 순서 (null = 미응시)
 const ACADEMIES = [
   {
     name: "한빛학원",
@@ -39,13 +41,18 @@ const ACADEMIES = [
       { id: "2026-W25", label: "6월 3주차 (6/15~6/21)", sessions: ["2026-06-16", "2026-06-19"] },
       { id: "2026-W26", label: "6월 4주차 (6/22~6/28)", sessions: ["2026-06-23", "2026-06-26"] },
       { id: "2026-W27", label: "7월 1주차 (6/29~7/5)", sessions: ["2026-06-30", "2026-07-03"] },
+      { id: "2026-W28", label: "7월 2주차 (7/6~7/12)", sessions: ["2026-07-07", "2026-07-10"] },
     ],
-    scores: {
-      "2026-W24": [82, 91, 75, 88, 95],
-      "2026-W25": [85, 88, 78, 92, 90],
-      "2026-W26": [79, 94, null, 85, 97],
-      "2026-W27": [88, 90, 82, 91, 93],
-    },
+    quizzes: [
+      { id: "qa1", unit: "물리: 등가속도 운동", weekId: "2026-W24", max: 100, scores: [82, 91, 75, 88, 95] },
+      { id: "qa2", unit: "물리: 자유낙하", weekId: "2026-W25", max: 100, scores: [85, 88, 78, 92, 90] },
+      { id: "qa3", unit: "화학: 몰 개념", weekId: "2026-W26", max: 100, scores: [79, 94, null, 85, 97] },
+      // 한 주차(W27)에 두 단원 퀴즈 — 다중 퀴즈 케이스
+      { id: "qa4", unit: "화학: 몰 농도", weekId: "2026-W27", max: 100, scores: [88, 90, 82, 91, 93] },
+      { id: "qa5", unit: "화학: 화학 반응식", weekId: "2026-W27", max: 100, scores: [76, 85, 80, 88, 90] },
+    ],
+    // 단원 리포트: qa4 = PDF+전달사항, qa3 = 전달사항만
+    reportsFor: { pdfAndNote: "qa4", noteOnly: "qa3" },
   },
   {
     name: "미래학원",
@@ -55,11 +62,13 @@ const ACADEMIES = [
       { id: "2026-W26", label: "6월 4주차 (6/22~6/28)", sessions: ["2026-06-24", "2026-06-27"] },
       { id: "2026-W27", label: "7월 1주차 (6/29~7/5)", sessions: ["2026-07-01", "2026-07-04"] },
     ],
-    scores: {
-      "2026-W25": [70, 95, 84, 88, null],
-      "2026-W26": [75, 92, 80, 91, 85],
-      "2026-W27": [81, 96, 85, 94, 89],
-    },
+    // 자유낙하·몰 개념은 한빛학원과 같은 단원명 → 전체 평균이 두 학원 합산으로 계산됨
+    quizzes: [
+      { id: "qb1", unit: "물리: 자유낙하", weekId: "2026-W25", max: 100, scores: [70, 95, 84, 88, null] },
+      { id: "qb2", unit: "화학: 몰 개념", weekId: "2026-W26", max: 100, scores: [75, 92, 80, 91, 85] },
+      { id: "qb3", unit: "화학: 화학 결합", weekId: "2026-W27", max: 100, scores: [81, 96, 85, 94, 89] },
+    ],
+    reportsFor: { pdfAndNote: "qb3", noteOnly: "qb2" },
   },
 ];
 
@@ -109,39 +118,55 @@ async function main() {
   const rosterStudents = [];
   const sampleLines = [];
 
+  // 단원명이 같은 퀴즈는 전 학원 학생을 합쳐 전체 평균 계산 (admin recomputeStats와 동일 규칙)
+  const unitPool = new Map();
+  for (const A of ACADEMIES) {
+    for (const q of A.quizzes) {
+      const key = q.unit.trim().replace(/\s+/g, " ");
+      const arr = unitPool.get(key) || [];
+      arr.push(...q.scores.filter((s) => s != null));
+      unitPool.set(key, arr);
+    }
+  }
+  const statsFor = (unit) => {
+    const scores = unitPool.get(unit.trim().replace(/\s+/g, " ")) || [];
+    return scores.length
+      ? {
+          avg: Math.round((scores.reduce((a, b) => a + b, 0) / scores.length) * 10) / 10,
+          count: scores.length,
+        }
+      : null;
+  };
+
   for (const A of ACADEMIES) {
     const aEntry = { fileId: randomHexId(16), key: randomKeyB64(), name: A.name };
     rosterAcademies.push(aEntry);
-    const { importAesKeyB64 } = await import("../js/crypto.js");
     const aKey = await importAesKeyB64(aEntry.key);
 
     // 자료실: 샘플 PDF 1개
     const pdfBytes = makeSamplePDF(`${A.name} - Sample Handout`);
     const mId = randomHexId(16);
     const mPath = `data/m/${mId}.bin`;
-    const encPdf = new Uint8Array(await encryptBytes(aKey, pdfBytes));
-    await writeFile(path.join(root, mPath), encPdf);
+    await writeFile(path.join(root, mPath), new Uint8Array(await encryptBytes(aKey, pdfBytes)));
 
-    // 학원 blob
-    const weeks = A.weeks.map((w, wi) => {
-      const scores = (A.scores[w.id] || []).filter((s) => s != null);
-      return {
-        ...w,
-        homework: HOMEWORK.slice(0, 2 + (wi % 2)),
-        progress: wi % 2 === 0 ? "화학: 몰 개념 ~ 몰 농도" : "물리: 등가속도 운동 ~ 자유낙하",
-        quizStats: scores.length
-          ? {
-              avg: Math.round((scores.reduce((a, b) => a + b, 0) / scores.length) * 10) / 10,
-              count: scores.length,
-              max: 100,
-            }
-          : null,
-      };
-    });
+    // 학원 blob (단원 퀴즈: stats = 두 학원 합산 전체 평균)
+    const quizzes = A.quizzes.map((q) => ({
+      id: q.id,
+      unit: q.unit,
+      weekId: q.weekId,
+      max: q.max,
+      stats: statsFor(q.unit),
+    }));
+    const weeks = A.weeks.map((w, wi) => ({
+      ...w,
+      homework: HOMEWORK.slice(0, 2 + (wi % 2)),
+      progress: wi % 2 === 0 ? "화학: 몰 개념 ~ 몰 농도" : "물리: 등가속도 운동 ~ 자유낙하",
+    }));
     const academyBlob = {
       v: FORMAT_VERSION,
       name: A.name,
       weeks,
+      quizzes,
       notices: [
         {
           id: randomHexId(6),
@@ -184,13 +209,13 @@ async function main() {
       rosterStudents.push({ code, name, fileId, encKey, academyFileId: aEntry.fileId, active: true });
       sampleLines.push(`| ${A.name} | ${name} | \`${code}\` |`);
 
+      // 주차 데이터: 숙제 체크 + 출석
       const weeksData = {};
       A.weeks.forEach((w, wi) => {
-        const score = (A.scores[w.id] || [])[si];
         const hwItems = HOMEWORK.slice(0, 2 + (wi % 2));
         const hw = {};
         hwItems.forEach((item, hi) => {
-          hw[item.id] = (si + hi + wi) % 3 !== 0; // 적당히 섞인 체크 상태
+          hw[item.id] = (si + hi + wi) % 3 !== 0;
         });
         const attendance = {};
         for (const [di, d] of w.sessions.entries()) {
@@ -198,39 +223,49 @@ async function main() {
           attendance[d] =
             k % 7 === 3 ? "L" : k % 11 === 5 ? "A" : k % 9 === 4 ? "E" : k % 13 === 6 ? "X" : "P";
         }
-        weeksData[w.id] = {
-          ...(score != null ? { quiz: { score, max: 100 } } : {}),
-          homework: hw,
-          attendance,
-          // 마지막 두 주차에 전달사항 텍스트 (마지막 주차만 PDF 동반 → PDF 없는 케이스도 QA 가능)
-          ...(wi >= A.weeks.length - 2
-            ? {
-                report: `${name} 학생은 이번 주 ${score != null ? `퀴즈에서 ${score}점을 받았습니다` : "퀴즈에 응시하지 않았습니다"}. 개념 이해는 좋으나 계산 실수를 줄이는 연습이 필요합니다. 다음 주에는 실험 단원 예습을 추천합니다.`,
-              }
-            : {}),
-        };
+        weeksData[w.id] = { homework: hw, attendance };
       });
 
-      // 마지막 주차에 개인 퀴즈 분석 PDF 샘플 (학생 본인 키로 암호화)
-      const lastWeekId = A.weeks[A.weeks.length - 1].id;
-      const analysisPdf = makeSamplePDF("Quiz Analysis Report");
-      const pdfPath = `data/m/${randomHexId(16)}.bin`;
-      await writeFile(
-        path.join(root, pdfPath),
-        new Uint8Array(await encryptBytes(aesKey, analysisPdf))
-      );
-      weeksData[lastWeekId].reportPdf = {
-        path: pdfPath,
-        origName: "quiz-analysis.pdf",
-        mime: "application/pdf",
-        size: analysisPdf.length,
-      };
+      // 단원 퀴즈 점수
+      const quizScores = {};
+      for (const q of A.quizzes) {
+        if (q.scores[si] != null) quizScores[q.id] = q.scores[si];
+      }
+
+      // 단원 리포트: pdfAndNote 퀴즈 = 분석 PDF + 전달사항 / noteOnly 퀴즈 = 전달사항만
+      const quizReports = {};
+      const pdfQuiz = A.quizzes.find((q) => q.id === A.reportsFor.pdfAndNote);
+      if (pdfQuiz && q_score(pdfQuiz, si) != null) {
+        const analysisPdf = makeSamplePDF("Quiz Analysis Report");
+        const pdfPath = `data/m/${randomHexId(16)}.bin`;
+        await writeFile(
+          path.join(root, pdfPath),
+          new Uint8Array(await encryptBytes(aesKey, analysisPdf))
+        );
+        quizReports[pdfQuiz.id] = {
+          pdf: {
+            path: pdfPath,
+            origName: "quiz-analysis.pdf",
+            mime: "application/pdf",
+            size: analysisPdf.length,
+          },
+          note: `${name} 학생은 「${pdfQuiz.unit}」 퀴즈에서 ${q_score(pdfQuiz, si)}점을 받았습니다. 개념 이해는 좋으나 계산 실수를 줄이는 연습이 필요합니다.`,
+        };
+      }
+      const noteQuiz = A.quizzes.find((q) => q.id === A.reportsFor.noteOnly);
+      if (noteQuiz && q_score(noteQuiz, si) != null) {
+        quizReports[noteQuiz.id] = {
+          note: `「${noteQuiz.unit}」 단원은 ${q_score(noteQuiz, si) >= 90 ? "매우 잘 이해하고 있습니다" : "기본 개념 복습을 권장합니다"}.`,
+        };
+      }
 
       const studentBlob = {
         v: FORMAT_VERSION,
         name,
         academy: { fileId: aEntry.fileId, key: aEntry.key, name: aEntry.name },
         weeks: weeksData,
+        quizzes: quizScores,
+        quizReports,
       };
       await writeFile(
         path.join(root, `data/s/${fileId}.json`),
@@ -266,11 +301,7 @@ async function main() {
 
   const sampleMD = `# 샘플 데이터 안내 (QA용)
 
-이 저장소에는 동작 확인용 **가상 학생 샘플 데이터**가 들어 있습니다.
-등장하는 학원·학생은 모두 실존하지 않는 예시입니다.
-
-실제로 사용하려면 \`admin.html\`에서 **초기 설정**을 실행하세요 —
-샘플 데이터가 새 데이터로 교체됩니다.
+이 데이터는 동작 확인용 **가상 학생 샘플**입니다. 스크래치 폴더에서만 생성해 사용하세요.
 
 ## 관리자 (admin.html)
 
@@ -287,8 +318,12 @@ ${sampleLines.join("\n")}
   await writeFile(path.join(root, "dev/SAMPLE.md"), sampleMD);
 
   console.log("샘플 데이터 생성 완료");
-  console.log(`학생 ${rosterStudents.length}명, 학원 ${rosterAcademies.length}곳`);
+  console.log(`학생 ${rosterStudents.length}명, 학원 ${rosterAcademies.length}곳, 단원 퀴즈 ${ACADEMIES.reduce((a, x) => a + x.quizzes.length, 0)}개`);
   console.log("코드 목록: dev/SAMPLE.md");
+}
+
+function q_score(quiz, si) {
+  return quiz.scores[si];
 }
 
 main().catch((e) => {

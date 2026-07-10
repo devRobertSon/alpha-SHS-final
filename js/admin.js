@@ -16,7 +16,7 @@ import {
   normalizePassword,
   b64encode,
 } from "./crypto.js";
-import { fetchJSON, fetchBytes, metaExists, sortWeeks, isoWeekId, toYMD, homeworkShareText, formatBytes, ATTENDANCE, ATTENDANCE_ORDER } from "./store.js";
+import { fetchJSON, fetchBytes, metaExists, sortWeeks, sortQuizzes, weekLabelOf, isoWeekId, toYMD, homeworkShareText, formatBytes, ATTENDANCE, ATTENDANCE_ORDER } from "./store.js";
 import { $, el, clear, toast, confirmModal, copyText, setBusy } from "./ui.js";
 import { runWizard, createStudent, emptyStudentBlob, emptyAcademyBlob, printCodeCards } from "./setup.js";
 import { buildDirectorReport } from "./report.js";
@@ -40,6 +40,7 @@ const S = {
   // UI 상태
   selAcademy: null,
   selWeek: new Map(), // academyFileId -> weekId
+  selQuiz: new Map(), // academyFileId -> quizId
   zipDownloaded: false,
 };
 
@@ -368,6 +369,163 @@ function selectedWeek() {
   return weeks.find((w) => w.id === wid) || weeks[weeks.length - 1];
 }
 
+function academyQuizzes(fileId = S.selAcademy) {
+  const blob = S.academies.get(fileId);
+  if (!blob) return [];
+  blob.quizzes = blob.quizzes || [];
+  return sortQuizzes(blob.quizzes, blob.weeks);
+}
+
+function selectedQuiz() {
+  const list = academyQuizzes();
+  if (!list.length) return null;
+  const qid = S.selQuiz.get(S.selAcademy);
+  return list.find((q) => q.id === qid) || list[list.length - 1];
+}
+
+function quizOptionLabel(q) {
+  const wl = weekLabelOf(academyBlob()?.weeks, q.weekId).replace(/\s*\(.*\)\s*/, "");
+  return wl ? `${q.unit} — ${wl}` : q.unit;
+}
+
+// 학원 + 퀴즈(단원) 선택 툴바
+function quizToolbar(container) {
+  const bar = el("div", { class: "toolbar" });
+  const aSel = el("select", { "aria-label": "학원 선택" });
+  for (const a of S.roster.academies) {
+    aSel.appendChild(el("option", { value: a.fileId, text: a.name, selected: a.fileId === S.selAcademy }));
+  }
+  aSel.addEventListener("change", () => {
+    S.selAcademy = aSel.value;
+    renderTab();
+  });
+  bar.appendChild(aSel);
+
+  const qSel = el("select", { "aria-label": "퀴즈(단원) 선택" });
+  const list = academyQuizzes();
+  const cur = selectedQuiz();
+  for (const q of list) {
+    qSel.appendChild(el("option", { value: q.id, text: quizOptionLabel(q), selected: cur && q.id === cur.id }));
+  }
+  if (!list.length) qSel.appendChild(el("option", { text: "퀴즈 없음", value: "" }));
+  qSel.addEventListener("change", () => {
+    S.selQuiz.set(S.selAcademy, qSel.value);
+    renderTab();
+  });
+  bar.appendChild(qSel);
+  bar.appendChild(el("button", { class: "btn btn-small", text: "+ 새 퀴즈", onclick: () => editQuiz(null) }));
+  if (cur) bar.appendChild(el("button", { class: "btn btn-small", text: "퀴즈 관리", onclick: () => editQuiz(cur) }));
+  container.appendChild(bar);
+}
+
+// 퀴즈(단원) 생성/편집/삭제 모달
+function editQuiz(quiz) {
+  const blob = academyBlob();
+  const weeks = sortWeeks(blob.weeks);
+  if (!weeks.length) {
+    toast("먼저 '주차 관리'(숙제/출석 탭)에서 주차를 만들어 주세요.", "error");
+    return;
+  }
+  const unitIn = el("input", { type: "text", value: quiz?.unit || "", placeholder: "단원명 (예: 화학 — 몰 농도)" });
+  const weekSel = el("select");
+  const defaultWeek = quiz?.weekId || selectedWeek()?.id;
+  for (const w of weeks) {
+    weekSel.appendChild(el("option", { value: w.id, text: w.label, selected: w.id === defaultWeek }));
+  }
+  const maxIn = el("input", { type: "number", value: String(quiz?.max || 100), min: "1" });
+  const err = el("p", { class: "error-text" });
+  const overlay = el("div", { class: "modal-overlay" });
+  overlay.appendChild(
+    el("div", { class: "modal" }, [
+      el("h3", { text: quiz ? "퀴즈 관리" : "새 단원 퀴즈" }),
+      el("p", {
+        class: "hint",
+        text: "두 학원에서 같은 단원명으로 퀴즈를 만들면 전체 평균이 두 학원 학생을 합쳐 계산됩니다.",
+      }),
+      el("label", { class: "field" }, [el("span", { text: "단원명" }), unitIn]),
+      el("label", { class: "field" }, [el("span", { text: "응시 주차" }), weekSel]),
+      el("label", { class: "field" }, [el("span", { text: "만점" }), maxIn]),
+      err,
+      el("div", { class: "modal-actions" }, [
+        quiz
+          ? el("button", {
+              class: "btn btn-danger",
+              text: "삭제",
+              onclick: async () => {
+                overlay.remove();
+                const ok = await confirmModal({
+                  title: "퀴즈 삭제",
+                  body: `'${quiz.unit}' 퀴즈를 삭제할까요? 모든 학생의 이 퀴즈 점수와 단원 리포트(PDF 포함)가 함께 삭제됩니다.`,
+                  okText: "삭제",
+                  danger: true,
+                });
+                if (!ok) return;
+                deleteQuiz(quiz);
+                renderTab();
+              },
+            })
+          : null,
+        el("button", { class: "btn", text: "취소", onclick: () => overlay.remove() }),
+        el("button", {
+          class: "btn btn-primary",
+          text: "저장",
+          onclick: () => {
+            const unit = unitIn.value.trim();
+            const max = parseFloat(maxIn.value) || 100;
+            if (!unit) return (err.textContent = "단원명을 입력해 주세요.");
+            if (quiz) {
+              if (quiz.unit !== unit || quiz.weekId !== weekSel.value || quiz.max !== max) {
+                quiz.unit = unit;
+                quiz.weekId = weekSel.value;
+                quiz.max = max;
+                markAcademy(S.selAcademy);
+              }
+            } else {
+              const q = { id: randomHexId(6), unit, weekId: weekSel.value, max, stats: null };
+              blob.quizzes = blob.quizzes || [];
+              blob.quizzes.push(q);
+              S.selQuiz.set(S.selAcademy, q.id);
+              markAcademy(S.selAcademy);
+            }
+            overlay.remove();
+            renderTab();
+          },
+        }),
+      ]),
+    ])
+  );
+  document.body.appendChild(overlay);
+  unitIn.focus();
+}
+
+// 퀴즈 삭제: 정의 + 모든 학생의 점수·단원 리포트(PDF 정리 포함)
+function deleteQuiz(quiz) {
+  const blob = academyBlob();
+  blob.quizzes = (blob.quizzes || []).filter((q) => q.id !== quiz.id);
+  markAcademy(S.selAcademy);
+  for (const st of S.roster.students) {
+    if (st.academyFileId !== S.selAcademy) continue;
+    const sBlob = S.students.get(st.fileId);
+    let touched = false;
+    if (sBlob.quizzes && quiz.id in sBlob.quizzes) {
+      delete sBlob.quizzes[quiz.id];
+      touched = true;
+    }
+    const rep = sBlob.quizReports?.[quiz.id];
+    if (rep) {
+      if (rep.pdf) {
+        if (S.pendingUploads.has(rep.pdf.path)) S.pendingUploads.delete(rep.pdf.path);
+        else S.pendingDeletes.add(rep.pdf.path);
+      }
+      delete sBlob.quizReports[quiz.id];
+      touched = true;
+    }
+    if (touched) markStudent(st.fileId);
+  }
+  recomputeStats();
+  toast(`'${quiz.unit}' 퀴즈가 삭제되었습니다. '발행'해야 반영됩니다.`, "ok");
+}
+
 function toolbar(container, { withWeek = true } = {}) {
   const bar = el("div", { class: "toolbar" });
   const aSel = el("select", { "aria-label": "학원 선택" });
@@ -475,7 +633,6 @@ function manageWeeks() {
       sessions: [],
       homework: [],
       progress: "",
-      quizStats: null,
     });
     S.selWeek.set(S.selAcademy, id);
     markAcademy(S.selAcademy);
@@ -606,17 +763,25 @@ async function reissueCode(st) {
     const oldFileId = st.fileId;
     const oldKey = await importAesKeyB64(st.encKey);
 
-    // 1) gather: 이 학생의 모든 분석 PDF 평문을 먼저 확보 —
+    // 1) gather: 이 학생의 모든 단원 리포트 PDF 평문을 먼저 확보 —
     //    하나라도 실패하면 아무것도 바꾸지 않는다 (구 키 유실 방지)
     const gathered = [];
-    for (const wd of Object.values(blob.weeks || {})) {
-      const pdf = wd.reportPdf;
+    for (const rep of Object.values(blob.quizReports || {})) {
+      const pdf = rep.pdf;
       if (!pdf) continue;
       const pending = S.pendingUploads.get(pdf.path);
       const bytes = pending
         ? pending.bytes
         : new Uint8Array(await decryptBytes(oldKey, await fetchBytes(pdf.path)));
       gathered.push({ pdf, wasPending: !!pending, bytes });
+    }
+    // 구(주차별) 리포트 PDF는 더 이상 표시되지 않으므로 정리 삭제만 예약
+    const legacyDeletes = [];
+    for (const wd of Object.values(blob.weeks || {})) {
+      if (wd.reportPdf) {
+        legacyDeletes.push(wd.reportPdf.path);
+        delete wd.reportPdf;
+      }
     }
 
     // 2) commit: 새 키 유도 후 일괄 반영
@@ -629,6 +794,10 @@ async function reissueCode(st) {
     S.students.set(fileId, blob);
     S.dirtyStudents.delete(oldFileId);
     S.pendingDeletes.add(`data/s/${oldFileId}.json`);
+    for (const p of legacyDeletes) {
+      if (S.pendingUploads.has(p)) S.pendingUploads.delete(p);
+      else S.pendingDeletes.add(p);
+    }
     for (const g of gathered) {
       if (g.wasPending) S.pendingUploads.delete(g.pdf.path);
       else S.pendingDeletes.add(g.pdf.path);
@@ -661,12 +830,15 @@ async function deleteStudent(st) {
   try {
     const academyFileId = st.academyFileId;
     // 이 학생의 분석 PDF 정리 (blob 제거 전에 경로를 확보해야 함)
+    // 단원 리포트 PDF + 구(주차별) 리포트 PDF 모두 정리
     const blob = S.students.get(st.fileId);
-    for (const wd of Object.values(blob?.weeks || {})) {
-      const pdf = wd.reportPdf;
-      if (!pdf) continue;
-      if (S.pendingUploads.has(pdf.path)) S.pendingUploads.delete(pdf.path);
-      else S.pendingDeletes.add(pdf.path);
+    const pdfPaths = [
+      ...Object.values(blob?.quizReports || {}).map((r) => r.pdf?.path),
+      ...Object.values(blob?.weeks || {}).map((wd) => wd.reportPdf?.path),
+    ].filter(Boolean);
+    for (const p of pdfPaths) {
+      if (S.pendingUploads.has(p)) S.pendingUploads.delete(p);
+      else S.pendingDeletes.add(p);
     }
     S.roster.students = S.roster.students.filter((x) => x.fileId !== st.fileId);
     S.students.delete(st.fileId);
@@ -735,19 +907,23 @@ async function rotateAcademyKey(oldFileId) {
   markRoster();
 }
 
-// ---------- ② 점수 입력 ----------
+// ---------- ② 점수 입력 (단원별 퀴즈) ----------
 function renderScoresTab(container) {
-  toolbar(container);
-  const week = selectedWeek();
+  quizToolbar(container);
+  const quiz = selectedQuiz();
   const card = el("div", { class: "card" }, [el("h2", { text: "퀴즈 점수 입력" })]);
-  if (!week) {
-    card.appendChild(el("p", { class: "empty", text: "'주차 관리'에서 먼저 주차를 만들어 주세요." }));
+  if (!quiz) {
+    card.appendChild(
+      el("p", { class: "empty", text: "'+ 새 퀴즈'로 단원 퀴즈를 먼저 만들어 주세요. (한 주차에 여러 단원 퀴즈를 만들 수 있습니다)" })
+    );
     container.appendChild(card);
     return;
   }
+  card.appendChild(
+    el("p", { class: "hint", text: `단원: ${quiz.unit} · 응시 주차: ${weekLabelOf(academyBlob().weeks, quiz.weekId)} · 만점 ${quiz.max}점 (변경은 '퀴즈 관리')` })
+  );
 
   const students = activeStudentsOf(S.selAcademy);
-  const maxIn = el("input", { type: "number", value: String(weekQuizMax(week)), min: "1", class: "cell-input", style: "width:90px" });
 
   // TSV 붙여넣기
   const tsv = el("textarea", {
@@ -764,11 +940,11 @@ function renderScoresTab(container) {
     el("tr", {}, [el("th", { class: "name-cell", text: "이름" }), el("th", { text: "점수" })])
   );
   for (const st of students) {
-    const cur = S.students.get(st.fileId)?.weeks?.[week.id]?.quiz;
+    const cur = S.students.get(st.fileId)?.quizzes?.[quiz.id];
     const input = el("input", {
       type: "number",
       class: "cell-input",
-      value: cur ? String(cur.score) : "",
+      value: cur != null ? String(cur) : "",
       min: "0",
       oninput: updateAvg,
     });
@@ -810,39 +986,35 @@ function renderScoresTab(container) {
 
   card.appendChild(el("label", { class: "field" }, [el("span", { text: "엑셀에서 붙여넣기 (이름 ⇥ 점수)" }), tsv]));
   card.appendChild(warn);
-  card.appendChild(
-    el("div", { class: "toolbar" }, [el("span", { text: "만점:" }), maxIn, avgLine])
-  );
+  card.appendChild(el("div", { class: "toolbar" }, [avgLine]));
   card.appendChild(el("div", { class: "table-wrap" }, [tbl]));
   card.appendChild(
     el("button", {
       class: "btn btn-primary btn-block",
       style: "margin-top:12px",
-      text: "이 주차 점수 저장",
+      text: "이 퀴즈 점수 저장",
       onclick: () => {
-        const max = parseFloat(maxIn.value) || 100;
         let changed = 0;
         for (const st of students) {
           const raw = inputs.get(st.fileId).value.trim();
           const blob = S.students.get(st.fileId);
-          blob.weeks[week.id] = blob.weeks[week.id] || {};
+          blob.quizzes = blob.quizzes || {};
           if (raw === "") {
-            if (blob.weeks[week.id].quiz) {
-              delete blob.weeks[week.id].quiz;
+            if (quiz.id in blob.quizzes) {
+              delete blob.quizzes[quiz.id];
               markStudent(st.fileId);
               changed++;
             }
           } else {
             const score = parseFloat(raw);
-            const prev = blob.weeks[week.id].quiz;
-            if (!prev || prev.score !== score || prev.max !== max) {
-              blob.weeks[week.id].quiz = { score, max };
+            if (blob.quizzes[quiz.id] !== score) {
+              blob.quizzes[quiz.id] = score;
               markStudent(st.fileId);
               changed++;
             }
           }
         }
-        recomputeStats(S.selAcademy);
+        recomputeStats();
         toast(`저장되었습니다 (${changed}명 변경). '발행'해야 사이트에 반영됩니다.`, "ok");
       },
     })
@@ -850,31 +1022,38 @@ function renderScoresTab(container) {
   container.appendChild(card);
 }
 
-function weekQuizMax(week) {
-  // 이 주차에 이미 입력된 점수의 만점(없으면 100)
-  for (const st of S.roster.students) {
-    const q = S.students.get(st.fileId)?.weeks?.[week.id]?.quiz;
-    if (q?.max) return q.max;
+// 퀴즈별 전체 평균/응시 인원 재계산 (quizzes[].stats)
+// 단원명이 같은 퀴즈는 **모든 학원의 학생을 합쳐** 전체 평균을 계산한다.
+// (학원 blob에는 합산된 평균·인원 숫자만 저장되므로 타 학원 개인 정보는 노출되지 않음)
+function recomputeStats() {
+  const norm = (s) => String(s || "").trim().replace(/\s+/g, " ");
+  // 단원명 → 전 학원 합산 점수 풀
+  const pool = new Map();
+  for (const a of S.roster.academies) {
+    const blob = S.academies.get(a.fileId);
+    for (const q of blob?.quizzes || []) {
+      const key = norm(q.unit);
+      const arr = pool.get(key) || [];
+      for (const st of activeStudentsOf(a.fileId)) {
+        const v = S.students.get(st.fileId)?.quizzes?.[q.id];
+        if (v != null) arr.push(v);
+      }
+      pool.set(key, arr);
+    }
   }
-  return 100;
-}
-
-function recomputeStats(academyFileId) {
-  const blob = S.academies.get(academyFileId);
-  if (!blob) return;
-  for (const w of blob.weeks) {
-    const scores = activeStudentsOf(academyFileId)
-      .map((st) => S.students.get(st.fileId)?.weeks?.[w.id]?.quiz)
-      .filter(Boolean);
-    const prev = JSON.stringify(w.quizStats || null);
-    w.quizStats = scores.length
-      ? {
-          avg: Math.round((scores.reduce((a, q) => a + q.score, 0) / scores.length) * 10) / 10,
-          count: scores.length,
-          max: scores[0].max,
-        }
-      : null;
-    if (JSON.stringify(w.quizStats) !== prev) markAcademy(academyFileId);
+  for (const a of S.roster.academies) {
+    const blob = S.academies.get(a.fileId);
+    for (const q of blob?.quizzes || []) {
+      const scores = pool.get(norm(q.unit)) || [];
+      const prev = JSON.stringify(q.stats || null);
+      q.stats = scores.length
+        ? {
+            avg: Math.round((scores.reduce((x, y) => x + y, 0) / scores.length) * 10) / 10,
+            count: scores.length,
+          }
+        : null;
+      if (JSON.stringify(q.stats) !== prev) markAcademy(a.fileId);
+    }
   }
 }
 
@@ -1122,16 +1301,17 @@ function renderAttendanceTab(container) {
   container.appendChild(card);
 }
 
-// ---------- ⑤ 리포트 ----------
+// ---------- ⑤ 리포트 (단원별) ----------
 function renderReportsTab(container) {
-  toolbar(container);
-  const week = selectedWeek();
-  const card = el("div", { class: "card" }, [el("h2", { text: "주간 리포트 작성" })]);
-  if (!week) {
-    card.appendChild(el("p", { class: "empty", text: "'주차 관리'에서 먼저 주차를 만들어 주세요." }));
+  quizToolbar(container);
+  const quiz = selectedQuiz();
+  const card = el("div", { class: "card" }, [el("h2", { text: "단원 리포트 작성" })]);
+  if (!quiz) {
+    card.appendChild(el("p", { class: "empty", text: "'+ 새 퀴즈'로 단원 퀴즈를 먼저 만들어 주세요." }));
     container.appendChild(card);
     return;
   }
+  card.appendChild(el("p", { class: "hint", text: `단원: ${quiz.unit} · 응시 주차: ${weekLabelOf(academyBlob().weeks, quiz.weekId)}` }));
   const students = activeStudentsOf(S.selAcademy);
   if (!students.length) {
     card.appendChild(el("p", { class: "empty", text: "학생이 없습니다." }));
@@ -1143,27 +1323,39 @@ function renderReportsTab(container) {
   const count = el("div", { class: "char-count" });
   const ta = el("textarea", {
     rows: "6",
-    placeholder: "학생/학부모에게 전달할 사항을 간단히 적어 주세요. 그대로 보입니다.",
+    placeholder: "이 단원에 대해 학생/학부모에게 전달할 사항을 적어 주세요. 그대로 보입니다.",
   });
+
+  const ensureRep = (st) => {
+    const blob = S.students.get(st.fileId);
+    blob.quizReports = blob.quizReports || {};
+    blob.quizReports[quiz.id] = blob.quizReports[quiz.id] || {};
+    return blob.quizReports[quiz.id];
+  };
+  const cleanupRep = (st) => {
+    const blob = S.students.get(st.fileId);
+    const rep = blob.quizReports?.[quiz.id];
+    if (rep && !rep.pdf && !rep.note) delete blob.quizReports[quiz.id];
+  };
 
   // ---- 퀴즈 분석 PDF (학생 본인 키로 암호화 — 그 학생 코드로만 열림) ----
   const pdfBox = el("div");
 
   const removePdf = (st) => {
-    const wd = S.students.get(st.fileId).weeks?.[week.id];
-    const pdf = wd?.reportPdf;
+    const rep = S.students.get(st.fileId).quizReports?.[quiz.id];
+    const pdf = rep?.pdf;
     if (!pdf) return;
     if (S.pendingUploads.has(pdf.path)) S.pendingUploads.delete(pdf.path);
     else S.pendingDeletes.add(pdf.path);
-    delete wd.reportPdf;
+    delete rep.pdf;
+    cleanupRep(st);
     markStudent(st.fileId);
   };
 
   const renderPdf = () => {
     clear(pdfBox);
     const st = students[idx];
-    const wd = S.students.get(st.fileId).weeks?.[week.id] || {};
-    const pdf = wd.reportPdf;
+    const pdf = S.students.get(st.fileId).quizReports?.[quiz.id]?.pdf;
     if (pdf) {
       pdfBox.appendChild(
         el("div", { class: "material" }, [
@@ -1207,10 +1399,8 @@ function renderReportsTab(container) {
           toast("파일이 큽니다 — 업로드와 열람이 느릴 수 있습니다.", "error");
         const bytes = new Uint8Array(await f.arrayBuffer());
         removePdf(st); // 교체 시 기존 것 정리 (대기 중 → 맵 제거 / 발행됨 → 삭제 예약)
-        const blob = S.students.get(st.fileId);
-        blob.weeks[week.id] = blob.weeks[week.id] || {};
         const path = `data/m/${randomHexId(16)}.bin`;
-        blob.weeks[week.id].reportPdf = {
+        ensureRep(st).pdf = {
           path,
           origName: f.name,
           size: f.size,
@@ -1228,19 +1418,21 @@ function renderReportsTab(container) {
   const load = () => {
     const st = students[idx];
     who.textContent = `${st.name} (${idx + 1}/${students.length})`;
-    ta.value = S.students.get(st.fileId)?.weeks?.[week.id]?.report || "";
+    ta.value = S.students.get(st.fileId)?.quizReports?.[quiz.id]?.note || "";
     count.textContent = `${ta.value.length}자`;
     renderPdf();
   };
   const save = () => {
     const st = students[idx];
-    const blob = S.students.get(st.fileId);
-    const cur = blob.weeks?.[week.id]?.report || "";
+    const cur = S.students.get(st.fileId).quizReports?.[quiz.id]?.note || "";
     const next = ta.value;
     if (cur !== next) {
-      blob.weeks[week.id] = blob.weeks[week.id] || {};
-      if (next) blob.weeks[week.id].report = next;
-      else delete blob.weeks[week.id].report;
+      if (next) ensureRep(st).note = next;
+      else {
+        const rep = S.students.get(st.fileId).quizReports?.[quiz.id];
+        if (rep) delete rep.note;
+        cleanupRep(st);
+      }
       markStudent(st.fileId);
     }
   };
@@ -1522,6 +1714,7 @@ function renderDirectorTab(container) {
   const { checks, doc } = buildDirectorReport({
     academyName: academyEntry().name,
     weeks: academyBlob().weeks,
+    quizzes: academyBlob().quizzes || [],
     weekId: week.id,
     students: activeStudentsOf(S.selAcademy).map((st) => ({
       name: st.name,
@@ -1784,8 +1977,8 @@ async function buildPublishFiles(mode) {
     }
     blob.name = st.name;
   }
-  // 2) 반 평균 재계산
-  for (const a of S.roster.academies) recomputeStats(a.fileId);
+  // 2) 전체 평균 재계산 (단원명이 같은 퀴즈는 전 학원 학생 합산)
+  recomputeStats();
 
   // 3) meta 갱신
   S.meta.students = S.roster.students.map((s) => s.fileId);
