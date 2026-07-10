@@ -2,16 +2,17 @@
 // 보고서는 브라우저 메모리에서만 만들어지고 인쇄(PDF 저장)로만 나간다.
 // 저장소에는 절대 커밋되지 않는다 (실명·점수 포함).
 import { el } from "./ui.js";
-import { sortWeeks, ATTENDANCE, ATTENDANCE_ORDER, toYMD } from "./store.js";
+import { sortWeeks, sortQuizzes, ATTENDANCE, ATTENDANCE_ORDER, toYMD } from "./store.js";
 
 // 입력:
-//   academyName, weeks(학원 blob의 weeks), weekId(보고 대상 주차 W),
-//   students: [{name, blob}] (활성 학생, roster 순서), notices(학원 blob),
-//   teacherName, dirty(발행 안 된 변경 존재 여부)
+//   academyName, weeks(학원 blob), quizzes(학원 blob의 단원 퀴즈 목록),
+//   weekId(보고 대상 주차 W), students: [{name, blob}] (활성 학생),
+//   notices(학원 blob), teacherName, dirty(발행 안 된 변경 존재 여부)
 // 반환: { checks: [{level:'ok'|'warn'|'info', text}], doc: HTMLElement }
 export function buildDirectorReport({
   academyName,
   weeks,
+  quizzes,
   weekId,
   students,
   notices,
@@ -22,7 +23,8 @@ export function buildDirectorReport({
   const wIdx = sorted.findIndex((w) => w.id === weekId);
   const W = sorted[wIdx];
   const P = wIdx > 0 ? sorted[wIdx - 1] : null; // 저번 주차
-  const PP = wIdx > 1 ? sorted[wIdx - 2] : null; // 전전 주차 (평균 변화 비교용)
+  const weekOrder = new Map(sorted.map((w, i) => [w.id, i]));
+  const allQuizzes = sortQuizzes(quizzes, weeks);
 
   const checks = [];
   const warn = (text) => checks.push({ level: "warn", text });
@@ -169,82 +171,117 @@ export function buildDirectorReport({
     }
     doc.appendChild(section(`지난 주 숙제 수행 — ${P.label}`, hwChildren));
 
-    // ---------- ④ 지난 주 퀴즈 결과 + 자동 분석 (P) ----------
+    // ---------- ④ 지난 주 단원 퀴즈 결과 + 자동 분석 (P) ----------
     const quizChildren = [];
-    const scores = [];
-    const noScore = [];
-    const tbl = el("table", { class: "rd-table rd-quiz-table" });
-    tbl.appendChild(el("tr", {}, [el("th", { text: "이름" }), el("th", { text: "점수" })]));
-    let max = 100;
-    for (const s of students) {
-      const q = s.blob.weeks?.[P.id]?.quiz;
-      if (q) {
-        scores.push(q.score);
-        max = q.max || max;
-      } else noScore.push(s.name);
-    }
-    const hi = scores.length ? Math.max(...scores) : null;
-    for (const s of students) {
-      const q = s.blob.weeks?.[P.id]?.quiz;
-      tbl.appendChild(
-        el("tr", { class: q && q.score === hi ? "rd-top" : "" }, [
-          el("td", { class: "rd-name", text: s.name }),
-          el("td", { class: "rd-score", text: q ? String(q.score) : "–" }),
-        ])
-      );
-    }
-    if (noScore.length) warn(`지난 주 퀴즈 점수 미입력: ${noScore.join(", ")}`);
+    const quizzesP = allQuizzes.filter((q) => q.weekId === P.id);
 
-    if (scores.length) {
-      const avg = Math.round((scores.reduce((a, b) => a + b, 0) / scores.length) * 10) / 10;
-      const lo = Math.min(...scores);
-      quizChildren.push(
-        el("div", { class: "rd-stats" }, [
-          statTile("반 평균", `${avg}점`),
-          statTile("최고", `${hi}점`),
-          statTile("최저", `${lo}점`),
-          statTile("응시", `${scores.length}명`, `만점 ${max}점`),
+    // 추이 데이터: P 주차까지 응시한 모든 단원 퀴즈의 반 평균
+    const trendData = allQuizzes
+      .filter((q) => weekOrder.has(q.weekId) && weekOrder.get(q.weekId) <= weekOrder.get(P.id))
+      .map((q) => ({ label: q.unit, avg: quizAvg(q, students), isP: q.weekId === P.id }))
+      .filter((d) => d.avg != null);
+
+    if (!quizzesP.length) {
+      warn(`지난 주(${P.label})에 등록된 단원 퀴즈가 없습니다.`);
+      quizChildren.push(el("p", { class: "rd-empty", text: "(지난 주 퀴즈 없음)" }));
+    } else {
+      // 퀴즈별 통계
+      const perQuiz = quizzesP.map((q) => {
+        const scores = students.map((s) => s.blob.quizzes?.[q.id]).filter((v) => v != null);
+        const missing = students.filter((s) => s.blob.quizzes?.[q.id] == null).map((s) => s.name);
+        return {
+          q,
+          scores,
+          missing,
+          avg: scores.length ? round1(scores.reduce((a, b) => a + b, 0) / scores.length) : null,
+          hi: scores.length ? Math.max(...scores) : null,
+          lo: scores.length ? Math.min(...scores) : null,
+        };
+      });
+      for (const pq of perQuiz) {
+        if (!pq.scores.length) warn(`「${pq.q.unit}」 퀴즈 점수가 하나도 입력되지 않았습니다.`);
+        else if (pq.missing.length) warn(`「${pq.q.unit}」 점수 미입력: ${pq.missing.join(", ")}`);
+      }
+
+      // 단일 퀴즈면 통계 타일, 복수면 퀴즈별 요약 줄
+      if (perQuiz.length === 1 && perQuiz[0].scores.length) {
+        const pq = perQuiz[0];
+        quizChildren.push(
+          el("div", { class: "rd-stats" }, [
+            statTile("반 평균", `${pq.avg}점`),
+            statTile("최고", `${pq.hi}점`),
+            statTile("최저", `${pq.lo}점`),
+            statTile("응시", `${pq.scores.length}명`, `만점 ${pq.q.max || 100}점`),
+          ])
+        );
+      }
+
+      // 통합 점수표: 이름 | 단원1 | 단원2 …
+      const tbl = el("table", { class: "rd-table rd-quiz-table" });
+      tbl.appendChild(
+        el("tr", {}, [
+          el("th", { text: "이름" }),
+          ...quizzesP.map((q) => el("th", { text: `${q.unit} (${q.max || 100}점)` })),
         ])
       );
+      for (const s of students) {
+        tbl.appendChild(
+          el("tr", {}, [
+            el("td", { class: "rd-name", text: s.name }),
+            ...quizzesP.map((q) => {
+              const v = s.blob.quizzes?.[q.id];
+              return el("td", { class: "rd-score", text: v != null ? String(v) : "–" });
+            }),
+          ])
+        );
+      }
       quizChildren.push(el("div", { class: "rd-table-wrap" }, [tbl]));
 
-      // 반 평균 추이 (P까지의 주차별 평균)
-      const trendData = sorted.slice(0, wIdx).map((w) => ({
-        label: String(w.label).replace(/\s*\(.*\)\s*/, ""),
-        avg: weekAvg(w, students),
-        isP: w.id === P.id,
-      })).filter((d) => d.avg != null);
-      if (trendData.length >= 2) {
-        quizChildren.push(el("h3", { class: "rd-h3", text: "반 평균 추이" }));
-        quizChildren.push(renderTrend(trendData, max));
-      }
-
-      let trend = "";
-      if (PP) {
-        const prevAvg = weekAvg(PP, students);
-        if (prevAvg != null) {
-          const diff = Math.round((avg - prevAvg) * 10) / 10;
-          trend =
-            diff > 0
-              ? ` 전주 평균(${prevAvg}점)보다 ${diff}점 상승했습니다.`
-              : diff < 0
-                ? ` 전주 평균(${prevAvg}점)보다 ${Math.abs(diff)}점 하락했습니다.`
-                : ` 전주 평균(${prevAvg}점)과 동일합니다.`;
+      if (perQuiz.length > 1) {
+        for (const pq of perQuiz.filter((x) => x.scores.length)) {
+          quizChildren.push(
+            el("p", {
+              class: "rd-note",
+              text: `「${pq.q.unit}」 응시 ${pq.scores.length}명 · 평균 ${pq.avg}점 · 최고 ${pq.hi}점 · 최저 ${pq.lo}점 (만점 ${pq.q.max || 100}점)`,
+            })
+          );
         }
       }
-      quizChildren.push(
-        el("div", { class: "rd-callout" }, [
-          el("strong", { text: "분석 " }),
-          el("span", {
-            text: `응시 인원 ${scores.length}명의 평균은 ${avg}점(만점 ${max}점)이며, 최고 ${hi}점 · 최저 ${lo}점으로 편차는 ${hi - lo}점입니다.${trend}`,
-          }),
-        ])
-      );
-    } else {
-      warn(`지난 주(${P.label}) 퀴즈 점수가 하나도 입력되지 않았습니다.`);
-      quizChildren.push(el("p", { class: "rd-empty", text: "(점수 없음)" }));
+
+      // 자동 분석: 퀴즈별 문장 + 직전 단원 퀴즈 대비 평균 변화
+      const sentences = [];
+      for (const pq of perQuiz.filter((x) => x.scores.length)) {
+        const i = trendData.findIndex((d) => d.label === pq.q.unit && d.avg === pq.avg);
+        let trend = "";
+        if (i > 0) {
+          const prev = trendData[i - 1];
+          const diff = round1(pq.avg - prev.avg);
+          trend =
+            diff > 0
+              ? ` 직전 퀴즈 「${prev.label}」(평균 ${prev.avg}점)보다 ${diff}점 상승했습니다.`
+              : diff < 0
+                ? ` 직전 퀴즈 「${prev.label}」(평균 ${prev.avg}점)보다 ${Math.abs(diff)}점 하락했습니다.`
+                : ` 직전 퀴즈 「${prev.label}」(평균 ${prev.avg}점)과 동일합니다.`;
+        }
+        sentences.push(
+          `「${pq.q.unit}」 응시 ${pq.scores.length}명 평균 ${pq.avg}점(만점 ${pq.q.max || 100}점), 최고 ${pq.hi}점 · 최저 ${pq.lo}점, 편차 ${pq.hi - pq.lo}점.${trend}`
+        );
+      }
+      if (sentences.length) {
+        quizChildren.push(
+          el("div", { class: "rd-callout" }, [
+            el("strong", { text: "분석 " }),
+            el("span", { text: sentences.join(" ") }),
+          ])
+        );
+      }
     }
-    doc.appendChild(section(`지난 주 퀴즈 결과 — ${P.label}`, quizChildren));
+
+    if (trendData.length >= 2) {
+      quizChildren.push(el("h3", { class: "rd-h3", text: "단원별 반 평균 추이" }));
+      quizChildren.push(renderTrend(trendData, Math.max(100, ...allQuizzes.map((q) => q.max || 0))));
+    }
+    doc.appendChild(section(`지난 주 단원 퀴즈 결과 — ${P.label}`, quizChildren));
   }
 
   // ---------- ⑤ 공지사항 (W 기간 + 고정) ----------
@@ -286,6 +323,10 @@ export function buildDirectorReport({
   return { checks, doc };
 }
 
+function round1(v) {
+  return Math.round(v * 10) / 10;
+}
+
 function statTile(label, value, sub) {
   return el("div", { class: "rd-stat" }, [
     el("div", { class: "rd-stat-label", text: label }),
@@ -294,17 +335,15 @@ function statTile(label, value, sub) {
   ]);
 }
 
-// 해당 주차의 반 평균 (quizStats 우선, 없으면 직접 계산)
-function weekAvg(week, students) {
-  if (week.quizStats?.avg != null) return week.quizStats.avg;
-  const scores = students
-    .map((s) => s.blob.weeks?.[week.id]?.quiz?.score)
-    .filter((v) => v != null);
+// 퀴즈의 반 평균 (stats 우선, 없으면 직접 계산)
+function quizAvg(quiz, students) {
+  if (quiz.stats?.avg != null) return quiz.stats.avg;
+  const scores = students.map((s) => s.blob.quizzes?.[quiz.id]).filter((v) => v != null);
   if (!scores.length) return null;
-  return Math.round((scores.reduce((a, b) => a + b, 0) / scores.length) * 10) / 10;
+  return round1(scores.reduce((a, b) => a + b, 0) / scores.length);
 }
 
-// 반 평균 추이 미니 차트 (단일 계열 — 제목이 곧 범례, 점 위 직접 라벨)
+// 단원별 반 평균 추이 미니 차트 (단일 계열 — 제목이 곧 범례, 점 위 직접 라벨)
 function renderTrend(data, maxScore) {
   const W = 360;
   const H = 110;
@@ -334,15 +373,20 @@ function renderTrend(data, maxScore) {
       s += `<text x="${x(i)}" y="${y(d.avg) - 8}" text-anchor="middle" font-size="9.5" font-weight="${d.isP ? 700 : 400}" fill="#0b0b0b">${d.avg}</text>`;
     }
     const anchor = i === 0 ? "start" : i === n - 1 ? "end" : "middle";
-    const every = Math.max(1, Math.ceil(n / 6));
+    const every = Math.max(1, Math.ceil(n / 4));
     if (i % every === 0 || i === n - 1) {
-      s += `<text x="${x(i)}" y="${H - M.bottom + 13}" text-anchor="${anchor}" font-size="9" fill="#898781">${escapeXML(d.label)}</text>`;
+      s += `<text x="${x(i)}" y="${H - M.bottom + 13}" text-anchor="${anchor}" font-size="9" fill="#898781">${escapeXML(shorten(d.label))}</text>`;
     }
   });
 
   const box = el("div", { class: "rd-chart" });
-  box.innerHTML = `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="주차별 반 평균 추이" style="width:100%;height:auto;display:block">${s}</svg>`;
+  box.innerHTML = `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="단원별 반 평균 추이" style="width:100%;height:auto;display:block">${s}</svg>`;
   return box;
+}
+
+function shorten(label) {
+  const t = String(label);
+  return t.length > 7 ? t.slice(0, 6) + "…" : t;
 }
 
 function escapeXML(t) {

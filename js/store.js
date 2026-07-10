@@ -103,6 +103,26 @@ export function isoWeekId(date) {
   return `${d.getUTCFullYear()}-W${String(weekNo).padStart(2, "0")}`;
 }
 
+// ---------- 단원별 퀴즈 ----------
+// 학원 blob: quizzes[] = {id, unit(단원명), weekId(응시 주차), max(만점), stats:{avg,count}|null}
+// 학생 blob: quizzes = {퀴즈ID: 점수}, quizReports = {퀴즈ID: {pdf?:{path,origName,size,mime}, note?:string}}
+// 한 주차에 여러 단원 퀴즈가 있을 수 있다. 정렬은 응시 주차 순 → 같은 주차는 등록 순.
+export function sortQuizzes(quizzes, weeks) {
+  const order = new Map(sortWeeks(weeks).map((w, i) => [w.id, i]));
+  return [...(quizzes || [])]
+    .map((q, i) => ({ q, i }))
+    .sort((a, b) => {
+      const wa = order.has(a.q.weekId) ? order.get(a.q.weekId) : 9999;
+      const wb = order.has(b.q.weekId) ? order.get(b.q.weekId) : 9999;
+      return wa !== wb ? wa - wb : a.i - b.i;
+    })
+    .map((x) => x.q);
+}
+
+export function weekLabelOf(weeks, weekId) {
+  return (weeks || []).find((w) => w.id === weekId)?.label || "";
+}
+
 // 출석 코드 (ATTENDANCE_ORDER는 선택 버튼 표시 순서 — 뒤에만 추가할 것)
 export const ATTENDANCE = {
   P: { label: "출석", cls: "att-p" },

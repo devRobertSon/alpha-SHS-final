@@ -4,6 +4,8 @@ import {
   loginStudent,
   loadMaterial,
   sortWeeks,
+  sortQuizzes,
+  weekLabelOf,
   currentWeek,
   homeworkShareText,
   formatBytes,
@@ -198,8 +200,8 @@ function renderDashboard() {
     const w = weeks.find((x) => x.id === selectedWeekId) || null;
     clear(content);
     if (id === "hw") renderHomework(content, w);
-    else if (id === "quiz") renderQuiz(content, w, weeks);
-    else if (id === "report") renderReport(content, w);
+    else if (id === "quiz") renderQuiz(content); // 단원별 — 주차 선택과 무관
+    else if (id === "report") renderReport(content); // 단원별 — 주차 선택과 무관
     else if (id === "notice") renderNotices(content);
     else if (id === "material") renderMaterials(content, weeks);
     else if (id === "att") renderAttendance(content, w);
@@ -269,38 +271,75 @@ function renderHomework(container, week) {
   container.appendChild(card);
 }
 
-// ---------- ② 퀴즈 ----------
-function renderQuiz(container, week, weeks) {
-  const card = el("div", { class: "card" }, [el("h2", { text: "퀴즈 점수" })]);
-  if (week) {
-    const q = weekData(week.id).quiz;
-    const stats = week.quizStats;
+// ---------- ② 퀴즈 (단원별) ----------
+function renderQuiz(container) {
+  const { student, academy } = session;
+  const quizzes = sortQuizzes(academy.quizzes, academy.weeks);
+  const myScores = student.quizzes || {};
+  const card = el("div", { class: "card" }, [el("h2", { text: "단원별 퀴즈" })]);
+  if (!quizzes.length) {
+    card.appendChild(el("p", { class: "empty", text: "아직 등록된 퀴즈가 없습니다." }));
+    container.appendChild(card);
+    return;
+  }
+
+  // 최근 응시 퀴즈 요약
+  const taken = quizzes.filter((q) => myScores[q.id] != null);
+  const latest = taken.length ? taken[taken.length - 1] : null;
+  if (latest) {
+    card.appendChild(
+      el("p", {
+        class: "hint",
+        text: `최근 퀴즈 · ${latest.unit} (${shortLabel(weekLabelOf(academy.weeks, latest.weekId))})`,
+      })
+    );
     card.appendChild(
       el("div", { class: "stat-row" }, [
-        statTile("내 점수", q ? String(q.score) : "–", q ? `만점 ${q.max}` : ""),
-        statTile("반 평균", stats && stats.avg != null ? String(stats.avg) : "–", ""),
-        statTile("응시 인원", stats && stats.count != null ? `${stats.count}명` : "–", ""),
+        statTile("내 점수", String(myScores[latest.id]), `만점 ${latest.max || 100}`),
+        statTile("반 평균", latest.stats?.avg != null ? String(latest.stats.avg) : "–", ""),
+        statTile("응시 인원", latest.stats?.count != null ? `${latest.stats.count}명` : "–", ""),
       ])
     );
   }
-  const chartBox = el("div");
-  card.appendChild(el("h2", { text: "점수 추이" }));
-  card.appendChild(chartBox);
 
-  const mine = weeks.map((w) => {
-    const q = weekData(w.id).quiz;
-    return q ? q.score : null;
+  // 추이 그래프 (단원 응시 순)
+  card.appendChild(el("h2", { text: "점수 추이" }));
+  const chartBox = el("div");
+  card.appendChild(chartBox);
+  renderScoreChart(chartBox, {
+    weeks: quizzes.map((q) => ({ id: q.id, label: q.unit })),
+    mine: quizzes.map((q) => (myScores[q.id] != null ? myScores[q.id] : null)),
+    avg: quizzes.map((q) => (q.stats?.avg != null ? q.stats.avg : null)),
+    yMax: Math.max(100, ...quizzes.map((q) => q.max || 0)),
   });
-  const avg = weeks.map((w) => (w.quizStats && w.quizStats.avg != null ? w.quizStats.avg : null));
-  const yMax = Math.max(
-    100,
-    ...weeks.map((w) => {
-      const q = weekData(w.id).quiz;
-      return q && q.max ? q.max : 0;
-    })
+
+  // 전체 목록 (최신 순)
+  card.appendChild(el("h2", { text: "퀴즈 목록", style: "margin-top:16px" }));
+  const tbl = el("table", { class: "grid" });
+  tbl.appendChild(
+    el("tr", {}, [
+      el("th", { class: "name-cell", text: "단원" }),
+      el("th", { text: "주차" }),
+      el("th", { text: "내 점수" }),
+      el("th", { text: "반 평균" }),
+    ])
   );
-  renderScoreChart(chartBox, { weeks, mine, avg, yMax });
+  for (const q of [...quizzes].reverse()) {
+    tbl.appendChild(
+      el("tr", {}, [
+        el("td", { class: "name-cell", text: q.unit }),
+        el("td", { text: shortLabel(weekLabelOf(academy.weeks, q.weekId)) }),
+        el("td", { class: "num", text: myScores[q.id] != null ? `${myScores[q.id]} / ${q.max || 100}` : "–" }),
+        el("td", { class: "num", text: q.stats?.avg != null ? String(q.stats.avg) : "–" }),
+      ])
+    );
+  }
+  card.appendChild(el("div", { class: "table-wrap" }, [tbl]));
   container.appendChild(card);
+}
+
+function shortLabel(label) {
+  return String(label || "").replace(/\s*\(.*\)\s*/, "");
 }
 
 function statTile(label, value, sub) {
@@ -351,28 +390,39 @@ function fileRow({ title, metaText, entry, key }) {
   ]);
 }
 
-// ---------- ③ 리포트 ----------
-function renderReport(container, week) {
-  const card = el("div", { class: "card" }, [el("h2", { text: "주간 리포트" })]);
-  const wd = week ? weekData(week.id) : {};
-  const report = wd.report;
-  const pdf = wd.reportPdf;
-  if (!report && !pdf) {
-    card.appendChild(
-      el("p", { class: "empty", text: "이번 주 리포트가 아직 작성되지 않았습니다." })
-    );
+// ---------- ③ 리포트 (단원별) ----------
+function renderReport(container) {
+  const { student, academy } = session;
+  const quizzes = sortQuizzes(academy.quizzes, academy.weeks);
+  const reports = student.quizReports || {};
+  const card = el("div", { class: "card" }, [el("h2", { text: "단원별 리포트" })]);
+  const withReport = [...quizzes]
+    .reverse()
+    .filter((q) => reports[q.id] && (reports[q.id].pdf || reports[q.id].note));
+  if (!withReport.length) {
+    card.appendChild(el("p", { class: "empty", text: "아직 작성된 리포트가 없습니다." }));
   } else {
-    if (pdf) {
-      card.appendChild(
-        fileRow({
-          title: "📊 퀴즈 분석 리포트",
-          metaText: [pdf.origName, formatBytes(pdf.size)].filter(Boolean).join(" · "),
-          entry: pdf,
-          key: session.studentKey,
-        })
-      );
+    for (const q of withReport) {
+      const rep = reports[q.id];
+      const sec = el("div", { class: "unit-report" }, [
+        el("div", { class: "unit-title" }, [
+          el("span", { text: q.unit }),
+          el("span", { class: "unit-week", text: shortLabel(weekLabelOf(academy.weeks, q.weekId)) }),
+        ]),
+      ]);
+      if (rep.pdf) {
+        sec.appendChild(
+          fileRow({
+            title: "📊 퀴즈 분석 리포트",
+            metaText: [rep.pdf.origName, formatBytes(rep.pdf.size)].filter(Boolean).join(" · "),
+            entry: rep.pdf,
+            key: session.studentKey,
+          })
+        );
+      }
+      if (rep.note) sec.appendChild(el("div", { class: "report-body", text: rep.note }));
+      card.appendChild(sec);
     }
-    if (report) card.appendChild(el("div", { class: "report-body", text: report }));
   }
   container.appendChild(card);
 }

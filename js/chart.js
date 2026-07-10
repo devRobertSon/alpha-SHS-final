@@ -30,7 +30,11 @@ export function renderScoreChart(container, { weeks, mine, avg, yMax = 100 }) {
   const x = (i) => M.left + (n === 1 ? iw / 2 : (i / (n - 1)) * iw);
   const y = (v) => M.top + ih - (Math.max(0, Math.min(v, yMax)) / yMax) * ih;
 
-  const short = (label) => String(label).replace(/\s*\(.*\)\s*/, "");
+  // 라벨 축약: 괄호 제거 + 길면 줄임표 (단원명이 길어 겹치는 것 방지)
+  const short = (label) => {
+    const t = String(label).replace(/\s*\(.*\)\s*/, "");
+    return t.length > 7 ? t.slice(0, 6) + "…" : t;
+  };
 
   let s = "";
   // 가로 그리드 (hairline, 5분할)
@@ -45,7 +49,7 @@ export function renderScoreChart(container, { weeks, mine, avg, yMax = 100 }) {
     }">${Math.round(g * step)}</text>`;
   }
   // X 라벨 (겹치지 않게 솎아내기, 양 끝은 잘리지 않게 정렬)
-  const every = Math.max(1, Math.ceil(n / 6));
+  const every = Math.max(1, Math.ceil(n / 4));
   for (let i = 0; i < n; i++) {
     if (i % every !== 0 && i !== n - 1) continue;
     const anchor = i === 0 ? "start" : i === n - 1 ? "end" : "middle";
