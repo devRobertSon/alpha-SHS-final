@@ -167,8 +167,6 @@ function logout() {
 function renderDashboard() {
   const { student, academy } = session;
   const weeks = sortWeeks(academy.weeks);
-  const cur = currentWeek(weeks);
-  let selectedWeekId = cur ? cur.id : weeks.length ? weeks[weeks.length - 1].id : null;
 
   const root = el("div", { class: "container" });
 
@@ -182,42 +180,42 @@ function renderDashboard() {
     ])
   );
 
-  // 주차 선택
-  const weekSelect = el("select", { "aria-label": "주차 선택" });
-  for (const w of weeks) {
-    weekSelect.appendChild(
-      el("option", { value: w.id, text: w.label, selected: w.id === selectedWeekId })
-    );
+  // 주차 선택 없음 — 숙제·출석·퀴즈 모두 전체 기록을 한 탭에서 보여준다 (최신 주차부터)
+  // 새 소식 배지: 마지막으로 열어본 이후 새로 발행된 공지/퀴즈/리포트가 있으면 탭에 ● 표시
+  const ids = newsIdSets();
+  let seen = loadSeen();
+  if (!seen) {
+    seen = ids; // 이 기기 첫 사용 — 배지 없이 시작
+    saveSeen(seen);
   }
-  weekSelect.addEventListener("change", () => {
-    selectedWeekId = weekSelect.value;
-    renderTab(activeTab);
-  });
-  root.appendChild(el("div", { class: "week-select-row" }, [weekSelect]));
+  const hasNew = (tab) => (ids[tab] || []).some((id) => !(seen[tab] || []).includes(id));
 
   const content = el("div", { id: "tab-content" });
-  let activeTab = "hw";
   const renderTab = (id) => {
-    activeTab = id;
-    const w = weeks.find((x) => x.id === selectedWeekId) || null;
     clear(content);
-    if (id === "hw") renderHomework(content, w);
-    else if (id === "quiz") renderQuiz(content); // 단원별 — 주차 선택과 무관
-    else if (id === "report") renderReport(content); // 단원별 — 주차 선택과 무관
+    if (id === "hw") renderHomework(content, weeks);
+    else if (id === "quiz") renderQuiz(content);
+    else if (id === "report") renderReport(content);
     else if (id === "notice") renderNotices(content);
     else if (id === "material") renderMaterials(content, weeks);
-    else if (id === "att") renderAttendance(content, w);
+    else if (id === "att") renderAttendance(content, weeks);
+    if (ids[id]) {
+      seen = { ...seen, [id]: ids[id] };
+      saveSeen(seen);
+      tabs.setBadge(id, false);
+    }
   };
 
+  // 우선순위 순서: 해야 할 것(숙제) → 놓치면 안 되는 것(공지) → 확인할 것(퀴즈·리포트) → 기록 → 참고
   const tabs = tabBar(
     root,
     [
       { id: "hw", label: "숙제" },
+      { id: "notice", label: "공지사항" },
       { id: "quiz", label: "퀴즈" },
       { id: "report", label: "리포트" },
-      { id: "notice", label: "공지사항" },
-      { id: "material", label: "자료실" },
       { id: "att", label: "출석·진도" },
+      { id: "material", label: "자료실" },
     ],
     renderTab
   );
@@ -225,36 +223,79 @@ function renderDashboard() {
 
   clear(app).appendChild(root);
   tabs.select("hw");
+  for (const t of ["notice", "quiz", "report"]) tabs.setBadge(t, hasNew(t));
+}
+
+// ---------- 새 소식(배지) 상태 — 기기별 localStorage, 무작위 ID만 저장 ----------
+function seenStoreKey() {
+  return `shs.seen.${session.studentFileId}`;
+}
+function newsIdSets() {
+  const { student, academy } = session;
+  return {
+    notice: (academy.notices || []).map((n) => String(n.id)),
+    quiz: Object.keys(student.quizzes || {}),
+    report: Object.entries(student.quizReports || {})
+      .filter(([, r]) => r && (r.pdf || r.note))
+      .map(([id]) => id),
+  };
+}
+function loadSeen() {
+  try {
+    const raw = JSON.parse(localStorage.getItem(seenStoreKey()));
+    return raw && typeof raw === "object" ? raw : null;
+  } catch {
+    return null;
+  }
+}
+function saveSeen(seen) {
+  try {
+    localStorage.setItem(seenStoreKey(), JSON.stringify(seen));
+  } catch {
+    /* 저장 불가(시크릿 모드 등)면 배지만 매번 다시 계산됨 */
+  }
 }
 
 function weekData(weekId) {
   return (session.student.weeks || {})[weekId] || {};
 }
 
-// ---------- ① 숙제 ----------
-function renderHomework(container, week) {
-  const card = el("div", { class: "card" }, [el("h2", { text: "이번 주 숙제" })]);
-  if (!week) {
-    card.appendChild(el("p", { class: "empty", text: "등록된 주차가 없습니다." }));
+// ---------- ① 숙제 (전체 주차, 최신순) ----------
+function renderHomework(container, weeks) {
+  const card = el("div", { class: "card" }, [el("h2", { text: "숙제" })]);
+  const withHw = [...weeks].reverse().filter((w) => (w.homework || []).length);
+  if (!withHw.length) {
+    card.appendChild(el("p", { class: "empty", text: "아직 등록된 숙제가 없습니다." }));
     container.appendChild(card);
     return;
   }
-  const items = week.homework || [];
-  const status = weekData(week.id).homework || {};
-  if (!items.length) {
-    card.appendChild(el("p", { class: "empty", text: "이번 주에 등록된 숙제가 없습니다." }));
-  } else {
+  card.appendChild(
+    el("p", { class: "hint", text: "선생님이 수업 시간에 확인 후 체크합니다. (최신 주차부터)" })
+  );
+  let anyHold = false;
+  for (const week of withHw) {
+    const items = week.homework;
+    const status = weekData(week.id).homework || {};
     const doneCount = items.filter((it) => status[it.id] === true).length;
     const holdCount = items.filter((it) => isNoShow(status, it.id)).length;
-    card.appendChild(
+    if (holdCount) anyHold = true;
+    const block = el("div", { class: "week-block" }, [
+      el("div", { class: "wb-head" }, [
+        el("span", { class: "wb-label", text: week.label }),
+        el("button", {
+          class: "btn btn-small",
+          text: "📋 복사",
+          "aria-label": `${week.label} 숙제 목록 복사`,
+          onclick: () => copyText(homeworkShareText(session.academy.name, week)),
+        }),
+      ]),
       el("p", {
         class: "hw-progress",
         text:
           `완료 ${doneCount} / ${items.length - holdCount}` +
-          (holdCount ? ` · 확인 전 ${holdCount}` : "") +
-          " (선생님이 수업 시간에 확인 후 체크합니다)",
-      })
-    );
+          (holdCount ? ` · 확인 전 ${holdCount}` : ""),
+      }),
+    ]);
     const ul = el("ul", { class: "hw-list" });
     for (const it of items) {
       const done = status[it.id] === true;
@@ -269,18 +310,12 @@ function renderHomework(container, week) {
         ])
       );
     }
-    card.appendChild(ul);
-    if (holdCount) {
-      card.appendChild(
-        el("p", { class: "hint", text: "◌ 결석 등으로 아직 확인하지 못한 숙제입니다. 다음 수업에서 확인합니다." })
-      );
-    }
+    block.appendChild(ul);
+    card.appendChild(block);
+  }
+  if (anyHold) {
     card.appendChild(
-      el("button", {
-        class: "btn btn-block",
-        text: "📋 숙제 목록 복사",
-        onclick: () => copyText(homeworkShareText(session.academy.name, week)),
-      })
+      el("p", { class: "hint", text: "◌ 결석 등으로 아직 확인하지 못한 숙제입니다. 다음 수업에서 확인합니다." })
     );
   }
   container.appendChild(card);
@@ -504,35 +539,45 @@ function renderMaterials(container, weeks) {
   container.appendChild(card);
 }
 
-// ---------- ⑥ 출석·진도 ----------
-function renderAttendance(container, week) {
-  const attCard = el("div", { class: "card" }, [el("h2", { text: "출석" })]);
-  if (!week || !(week.sessions || []).length) {
-    attCard.appendChild(el("p", { class: "empty", text: "이번 주 수업 일정이 없습니다." }));
-  } else {
-    const att = weekData(week.id).attendance || {};
-    const row = el("div", { class: "att-row" });
-    for (const d of week.sessions) {
-      const code = att[d];
-      const info = ATTENDANCE[code];
-      row.appendChild(
-        el("div", { class: `att-chip ${info ? info.cls : ""}` }, [
-          el("span", { class: "d", text: d.slice(5).replace("-", "/") }),
-          el("span", { class: "s", text: info ? info.label : "–" }),
-        ])
+// ---------- ⑥ 출석·진도 (전체 주차, 최신순) ----------
+function renderAttendance(container, weeks) {
+  const card = el("div", { class: "card" }, [el("h2", { text: "출석·진도" })]);
+  const shown = [...weeks]
+    .reverse()
+    .filter((w) => (w.sessions || []).length || (w.progress || "").trim());
+  if (!shown.length) {
+    card.appendChild(el("p", { class: "empty", text: "아직 수업 기록이 없습니다." }));
+    container.appendChild(card);
+    return;
+  }
+  card.appendChild(el("p", { class: "hint", text: "주차별 출석과 수업 진도입니다. (최신 주차부터)" }));
+  for (const week of shown) {
+    const block = el("div", { class: "week-block" }, [
+      el("div", { class: "wb-head" }, [el("span", { class: "wb-label", text: week.label })]),
+    ]);
+    if ((week.sessions || []).length) {
+      const att = weekData(week.id).attendance || {};
+      const row = el("div", { class: "att-row" });
+      for (const d of week.sessions) {
+        const code = att[d];
+        const info = ATTENDANCE[code];
+        row.appendChild(
+          el("div", { class: `att-chip ${info ? info.cls : ""}` }, [
+            el("span", { class: "d", text: d.slice(5).replace("-", "/") }),
+            el("span", { class: "s", text: info ? info.label : "–" }),
+          ])
+        );
+      }
+      block.appendChild(row);
+    }
+    if ((week.progress || "").trim()) {
+      block.appendChild(
+        el("div", { class: "progress-text wb-progress", text: `진도 · ${week.progress}` })
       );
     }
-    attCard.appendChild(row);
+    card.appendChild(block);
   }
-  container.appendChild(attCard);
-
-  const progCard = el("div", { class: "card" }, [el("h2", { text: "수업 진도" })]);
-  if (week && week.progress) {
-    progCard.appendChild(el("div", { class: "progress-text", text: week.progress }));
-  } else {
-    progCard.appendChild(el("p", { class: "empty", text: "이번 주 진도가 입력되지 않았습니다." }));
-  }
-  container.appendChild(progCard);
+  container.appendChild(card);
 }
 
 // ==================== 선생님(열람) 대시보드 ====================

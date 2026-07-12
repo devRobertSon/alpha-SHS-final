@@ -65,6 +65,33 @@
   flex: 1;
 }
 
+/* ---------- 주차 블록 (숙제/출석·진도 — 전체 주차를 최신순으로 표시) ---------- */
+.week-block {
+  padding: 10px 0 4px;
+}
+.week-block + .week-block {
+  border-top: 1px solid var(--hairline);
+  margin-top: 6px;
+  padding-top: 14px;
+}
+.wb-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 4px;
+}
+.wb-label {
+  font-weight: 700;
+  font-size: 15px;
+  min-width: 0;
+}
+.wb-progress {
+  font-size: 14px;
+  color: var(--ink-2);
+  margin-top: 2px;
+}
+
 /* ---------- 숙제 ---------- */
 .hw-list {
   list-style: none;
