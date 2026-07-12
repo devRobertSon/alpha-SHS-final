@@ -181,6 +181,15 @@ function renderDashboard() {
   );
 
   // 주차 선택 없음 — 숙제·출석·퀴즈 모두 전체 기록을 한 탭에서 보여준다 (최신 주차부터)
+  // 새 소식 배지: 마지막으로 열어본 이후 새로 발행된 공지/퀴즈/리포트가 있으면 탭에 ● 표시
+  const ids = newsIdSets();
+  let seen = loadSeen();
+  if (!seen) {
+    seen = ids; // 이 기기 첫 사용 — 배지 없이 시작
+    saveSeen(seen);
+  }
+  const hasNew = (tab) => (ids[tab] || []).some((id) => !(seen[tab] || []).includes(id));
+
   const content = el("div", { id: "tab-content" });
   const renderTab = (id) => {
     clear(content);
@@ -190,17 +199,23 @@ function renderDashboard() {
     else if (id === "notice") renderNotices(content);
     else if (id === "material") renderMaterials(content, weeks);
     else if (id === "att") renderAttendance(content, weeks);
+    if (ids[id]) {
+      seen = { ...seen, [id]: ids[id] };
+      saveSeen(seen);
+      tabs.setBadge(id, false);
+    }
   };
 
+  // 우선순위 순서: 해야 할 것(숙제) → 놓치면 안 되는 것(공지) → 확인할 것(퀴즈·리포트) → 기록 → 참고
   const tabs = tabBar(
     root,
     [
       { id: "hw", label: "숙제" },
+      { id: "notice", label: "공지사항" },
       { id: "quiz", label: "퀴즈" },
       { id: "report", label: "리포트" },
-      { id: "notice", label: "공지사항" },
-      { id: "material", label: "자료실" },
       { id: "att", label: "출석·진도" },
+      { id: "material", label: "자료실" },
     ],
     renderTab
   );
@@ -208,6 +223,37 @@ function renderDashboard() {
 
   clear(app).appendChild(root);
   tabs.select("hw");
+  for (const t of ["notice", "quiz", "report"]) tabs.setBadge(t, hasNew(t));
+}
+
+// ---------- 새 소식(배지) 상태 — 기기별 localStorage, 무작위 ID만 저장 ----------
+function seenStoreKey() {
+  return `shs.seen.${session.studentFileId}`;
+}
+function newsIdSets() {
+  const { student, academy } = session;
+  return {
+    notice: (academy.notices || []).map((n) => String(n.id)),
+    quiz: Object.keys(student.quizzes || {}),
+    report: Object.entries(student.quizReports || {})
+      .filter(([, r]) => r && (r.pdf || r.note))
+      .map(([id]) => id),
+  };
+}
+function loadSeen() {
+  try {
+    const raw = JSON.parse(localStorage.getItem(seenStoreKey()));
+    return raw && typeof raw === "object" ? raw : null;
+  } catch {
+    return null;
+  }
+}
+function saveSeen(seen) {
+  try {
+    localStorage.setItem(seenStoreKey(), JSON.stringify(seen));
+  } catch {
+    /* 저장 불가(시크릿 모드 등)면 배지만 매번 다시 계산됨 */
+  }
 }
 
 function weekData(weekId) {

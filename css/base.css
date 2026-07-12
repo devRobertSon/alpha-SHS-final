@@ -212,6 +212,19 @@ label.field > span {
   color: #fff;
   font-weight: 600;
 }
+/* 새 소식 배지 — 새 공지/퀴즈/리포트가 있는 탭에 표시 */
+.tab .tab-dot {
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  border-radius: 999px;
+  background: var(--bad);
+  margin-left: 5px;
+  vertical-align: 8px;
+}
+.tab.active .tab-dot {
+  background: #fff;
+}
 
 /* ---------- 토스트 ---------- */
 #toast {

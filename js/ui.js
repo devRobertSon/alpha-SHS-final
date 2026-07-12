@@ -106,7 +106,7 @@ export async function copyText(text, successMsg = "복사되었습니다. 카톡
 }
 
 // ---------- 탭 ----------
-// tabs: [{id, label}], onSelect(id). 반환: {select(id)}
+// tabs: [{id, label}], onSelect(id). 반환: {select(id), setBadge(id, on)}
 export function tabBar(container, tabs, onSelect) {
   const bar = el("div", { class: "tabbar", role: "tablist" });
   const buttons = new Map();
@@ -128,7 +128,15 @@ export function tabBar(container, tabs, onSelect) {
     bar.appendChild(btn);
   }
   container.appendChild(bar);
-  return { select };
+  // 새 소식 배지(●) — on이면 탭 라벨 뒤에 빨간 점 표시
+  const setBadge = (id, on) => {
+    const btn = buttons.get(id);
+    if (!btn) return;
+    const cur = btn.querySelector(".tab-dot");
+    if (on && !cur) btn.appendChild(el("span", { class: "tab-dot", "aria-label": "새 소식" }));
+    else if (!on && cur) cur.remove();
+  };
+  return { select, setBadge };
 }
 
 // ---------- 로딩 스피너 ----------
