@@ -1081,6 +1081,11 @@ async function rotateAcademyKey(oldFileId) {
       S.dirtyStudents.add(st.fileId);
     }
   }
+  // 소속 선생님 열람 코드도 새 학원을 가리키게 갱신 — 선생님 파일은 발행 때마다
+  // 새 학원 키를 담아 재생성되므로 코드 자체는 계속 유효하다
+  for (const t of S.roster.teachers || []) {
+    if (t.academyFileId === oldFileId) t.academyFileId = newFileId;
+  }
   if (S.selAcademy === oldFileId) S.selAcademy = newFileId;
   if (S.selWeek.has(oldFileId)) {
     S.selWeek.set(newFileId, S.selWeek.get(oldFileId));
