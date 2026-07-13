@@ -635,7 +635,7 @@ function renderTeacherDashboard() {
     [
       { id: "att", label: "출석 현황" },
       { id: "hw", label: "숙제" },
-      { id: "scores", label: "학생별 성적" },
+      { id: "scores", label: "퀴즈 성적" },
       { id: "reports", label: "리포트" },
       { id: "notice", label: "공지사항" },
     ],
@@ -891,14 +891,14 @@ function renderTeacherReports(container) {
   }
 }
 
-// ---------- 학생별 성적 (수업 날짜 선택 → 그 수업에 본 단원들 + 아래에 점수 분포) ----------
+// ---------- 퀴즈 성적 (수업 날짜 선택 → 위: 점수 분포 / 아래: 학생별 성적) ----------
 // 기본 선택 = 직전 수업 (마지막 수업의 하나 전). 그 수업에 퀴즈가 없으면
 // 퀴즈가 있는 가장 가까운 이전 수업으로 내려간다.
 function renderTeacherScores(container, weeks, state, rerender) {
   const { teacher, academy } = session;
   const allQuizzes = sortQuizzes(academy.quizzes, academy.weeks);
   const rows = teacher.snapshot?.scores || [];
-  const card = el("div", { class: "card" }, [el("h2", { text: "학생별 성적" })]);
+  const card = el("div", { class: "card" }, [el("h2", { text: "퀴즈 성적" })]);
   if (!allQuizzes.length || !rows.length) {
     card.appendChild(el("p", { class: "empty", text: "아직 등록된 퀴즈가 없습니다." }));
     container.appendChild(card);
@@ -956,11 +956,20 @@ function renderTeacherScores(container, weeks, state, rerender) {
   );
 
   const quizzes = selected.quizzes;
+  container.appendChild(card); // 날짜 선택 카드
   if (!quizzes.length) {
     card.appendChild(el("p", { class: "empty", text: "이 수업에 등록된 단원 퀴즈가 없습니다." }));
-    container.appendChild(card);
     return;
   }
+
+  // 퀴즈 점수 분포 (위)
+  const distBox = el("div", { class: "t-dist" });
+  distBox.appendChild(el("h2", { class: "t-dist-title", text: "퀴즈 점수 분포" }));
+  renderQuizDistCards(distBox, quizzes);
+  container.appendChild(distBox);
+
+  // 학생별 성적 (아래)
+  const scoreCard = el("div", { class: "card" }, [el("h2", { text: "학생별 성적" })]);
   const tbl = el("table", { class: "grid" });
   tbl.appendChild(
     el("tr", {}, [
@@ -998,14 +1007,8 @@ function renderTeacherScores(container, weeks, state, rerender) {
     );
   }
   tbl.appendChild(avgRow);
-  card.appendChild(el("div", { class: "table-wrap" }, [tbl]));
-  container.appendChild(card);
-
-  // 같은 날짜의 퀴즈 점수 분포 (익명 히스토그램) — 성적표 바로 아래
-  const distBox = el("div", { class: "t-dist" });
-  distBox.appendChild(el("h2", { class: "t-dist-title", text: "퀴즈 점수 분포" }));
-  renderQuizDistCards(distBox, quizzes);
-  container.appendChild(distBox);
+  scoreCard.appendChild(el("div", { class: "table-wrap" }, [tbl]));
+  container.appendChild(scoreCard);
 }
 
 // 스냅샷에서 특정 퀴즈의 점수 배열 (분포용)
