@@ -6,11 +6,11 @@ import {
   sortWeeks,
   sortQuizzes,
   weekLabelOf,
-  currentWeek,
   homeworkShareText,
   formatBytes,
   ATTENDANCE,
   isNoShow,
+  toYMD,
 } from "./store.js";
 import { $, el, clear, toast, copyText, tabBar, setBusy, spinner } from "./ui.js";
 import { renderScoreChart, renderHistogram } from "./chart.js";
@@ -607,8 +607,6 @@ function renderAttendance(container, weeks) {
 function renderTeacherDashboard() {
   const { teacher, academy } = session;
   const weeks = sortWeeks(academy.weeks);
-  const cur = currentWeek(weeks);
-  let selectedWeekId = cur ? cur.id : weeks.length ? weeks[weeks.length - 1].id : null;
 
   const root = el("div", { class: "container" });
   root.appendChild(
@@ -621,20 +619,14 @@ function renderTeacherDashboard() {
     ])
   );
 
-  let selectedQuizWeek = null; // 학생별 성적 탭의 주차 선택 (null = 기본값)
+  // 출석: 달력에서 선택한 수업 날짜 / 성적: 선택한 수업 날짜 (기본 = 직전 수업)
+  const state = { attDate: null, attMonth: null, scoreKey: null };
   const content = el("div", { id: "tab-content" });
   const renderTab = (id) => {
     clear(content);
-    if (id === "att") renderTeacherAttendance(content, weeks, selectedWeekId, (wid) => {
-      selectedWeekId = wid;
-      renderTab("att");
-    });
+    if (id === "att") renderTeacherAttendance(content, weeks, state, () => renderTab("att"));
     else if (id === "hw") renderTeacherHomework(content, weeks);
-    else if (id === "scores") renderTeacherScores(content, weeks, selectedQuizWeek, (v) => {
-      selectedQuizWeek = v;
-      renderTab("scores");
-    });
-    else if (id === "dist") renderTeacherQuizDist(content);
+    else if (id === "scores") renderTeacherScores(content, weeks, state, () => renderTab("scores"));
     else if (id === "reports") renderTeacherReports(content);
     else if (id === "notice") renderNotices(content);
   };
@@ -644,7 +636,6 @@ function renderTeacherDashboard() {
       { id: "att", label: "출석 현황" },
       { id: "hw", label: "숙제" },
       { id: "scores", label: "학생별 성적" },
-      { id: "dist", label: "퀴즈 분포" },
       { id: "reports", label: "리포트" },
       { id: "notice", label: "공지사항" },
     ],
@@ -655,54 +646,124 @@ function renderTeacherDashboard() {
   tabs.select("att");
 }
 
-// ---------- 출석 현황 (학생×수업일 표) ----------
-function renderTeacherAttendance(container, weeks, selectedWeekId, onWeekChange) {
+// 전체 수업일 목록: [{date, week}] 날짜순
+function teacherSessions(weeks) {
+  const out = [];
+  for (const w of weeks) for (const d of w.sessions || []) out.push({ date: d, week: w });
+  out.sort((a, b) => a.date.localeCompare(b.date));
+  return out;
+}
+// 오늘 이전(포함) 마지막 수업의 인덱스 (-1 = 아직 수업 전)
+function lastPastSessionIdx(sess) {
+  const today = toYMD(new Date());
+  let idx = -1;
+  for (let i = 0; i < sess.length; i++) if (sess[i].date <= today) idx = i;
+  return idx;
+}
+const fmtDateK = (d) => `${parseInt(d.slice(5, 7), 10)}월 ${parseInt(d.slice(8, 10), 10)}일`;
+
+// ---------- 출석 현황 (달력 → 날짜 클릭 → 그 날짜 학생별 출석) ----------
+function renderTeacherAttendance(container, weeks, state, rerender) {
   const { teacher } = session;
   const card = el("div", { class: "card" }, [el("h2", { text: "출석 현황" })]);
-  if (!weeks.length) {
-    card.appendChild(el("p", { class: "empty", text: "등록된 주차가 없습니다." }));
+  const sess = teacherSessions(weeks);
+  if (!sess.length) {
+    card.appendChild(el("p", { class: "empty", text: "등록된 수업일이 없습니다." }));
     container.appendChild(card);
     return;
   }
-  const weekSel = el("select", { "aria-label": "주차 선택" });
-  for (const w of weeks) {
-    weekSel.appendChild(el("option", { value: w.id, text: w.label, selected: w.id === selectedWeekId }));
+  // 기본 선택 = 오늘 이전 마지막 수업 (없으면 첫 수업)
+  const classDates = new Set(sess.map((s) => s.date));
+  if (!state.attDate || !classDates.has(state.attDate)) {
+    const idx = lastPastSessionIdx(sess);
+    state.attDate = sess[idx >= 0 ? idx : 0].date;
   }
-  weekSel.addEventListener("change", () => onWeekChange(weekSel.value));
-  card.appendChild(el("div", { class: "week-select-row" }, [weekSel]));
+  if (!state.attMonth) state.attMonth = state.attDate.slice(0, 7);
 
-  const week = weeks.find((w) => w.id === selectedWeekId) || weeks[weeks.length - 1];
-  const rows = teacher.snapshot?.attendance?.[week.id] || [];
-  const sessions = week.sessions || [];
-  if (!sessions.length || !rows.length) {
-    card.appendChild(el("p", { class: "empty", text: "이 주차의 출석 기록이 없습니다." }));
+  card.appendChild(
+    el("p", { class: "hint", text: "수업이 있는 날짜에 표시가 있습니다. 날짜를 누르면 그날 출석이 나옵니다." })
+  );
+
+  // 월 달력
+  const [y, m] = state.attMonth.split("-").map(Number);
+  const pad = (n) => String(n).padStart(2, "0");
+  const cal = el("div", { class: "cal" });
+  cal.appendChild(
+    el("div", { class: "cal-head" }, [
+      el("button", {
+        class: "btn btn-small",
+        text: "‹",
+        "aria-label": "이전 달",
+        onclick: () => {
+          state.attMonth = m === 1 ? `${y - 1}-12` : `${y}-${pad(m - 1)}`;
+          rerender();
+        },
+      }),
+      el("span", { class: "cal-title", text: `${y}년 ${m}월` }),
+      el("button", {
+        class: "btn btn-small",
+        text: "›",
+        "aria-label": "다음 달",
+        onclick: () => {
+          state.attMonth = m === 12 ? `${y + 1}-01` : `${y}-${pad(m + 1)}`;
+          rerender();
+        },
+      }),
+    ])
+  );
+  const grid = el("div", { class: "cal-grid" });
+  for (const dow of ["일", "월", "화", "수", "목", "금", "토"]) {
+    grid.appendChild(el("div", { class: "cal-dow", text: dow }));
+  }
+  const startDow = new Date(y, m - 1, 1).getDay();
+  const daysInMonth = new Date(y, m, 0).getDate();
+  for (let i = 0; i < startDow; i++) grid.appendChild(el("div"));
+  for (let d = 1; d <= daysInMonth; d++) {
+    const dateStr = `${y}-${pad(m)}-${pad(d)}`;
+    const has = classDates.has(dateStr);
+    const btn = el("button", {
+      class: `cal-day${has ? " has-class" : ""}${dateStr === state.attDate ? " sel" : ""}`,
+      text: String(d),
+      onclick: has
+        ? () => {
+            state.attDate = dateStr;
+            rerender();
+          }
+        : undefined,
+    });
+    if (!has) btn.disabled = true;
+    else btn.appendChild(el("span", { class: "dot", "aria-hidden": "true" }));
+    grid.appendChild(btn);
+  }
+  cal.appendChild(grid);
+  card.appendChild(cal);
+
+  // 선택한 날짜의 학생별 출석
+  const picked = sess.find((s) => s.date === state.attDate);
+  card.appendChild(el("h3", { class: "att-date-title", text: `${fmtDateK(state.attDate)} 출석` }));
+  const rows = teacher.snapshot?.attendance?.[picked.week.id] || [];
+  if (!rows.length) {
+    card.appendChild(el("p", { class: "empty", text: "이 날짜의 출석 기록이 없습니다." }));
   } else {
     const tbl = el("table", { class: "grid" });
-    tbl.appendChild(
-      el("tr", {}, [
-        el("th", { class: "name-cell", text: "이름" }),
-        ...sessions.map((d) => el("th", { text: d.slice(5).replace("-", "/") })),
-      ])
-    );
+    tbl.appendChild(el("tr", {}, [el("th", { class: "name-cell", text: "이름" }), el("th", { text: "출석" })]));
     for (const r of rows) {
+      const info = ATTENDANCE[r.byDate?.[state.attDate]];
       tbl.appendChild(
         el("tr", {}, [
           el("td", { class: "name-cell", text: r.name }),
-          ...sessions.map((d) => {
-            const info = ATTENDANCE[r.byDate?.[d]];
-            return el("td", {}, [
-              info
-                ? el("span", { class: `t-chip ${info.cls}`, text: info.label })
-                : el("span", { class: "t-dash", text: "–" }),
-            ]);
-          }),
+          el("td", {}, [
+            info
+              ? el("span", { class: `t-chip ${info.cls}`, text: info.label })
+              : el("span", { class: "t-dash", text: "–" }),
+          ]),
         ])
       );
     }
     card.appendChild(el("div", { class: "table-wrap" }, [tbl]));
   }
-  if (week.progress) {
-    card.appendChild(el("p", { class: "hint", text: `진도 · ${week.progress}` }));
+  if (picked.week.progress) {
+    card.appendChild(el("p", { class: "hint", text: `진도 · ${picked.week.progress}` }));
   }
   container.appendChild(card);
 }
@@ -830,8 +891,10 @@ function renderTeacherReports(container) {
   }
 }
 
-// ---------- 학생별 성적 (주차 선택 → 그 수업에 본 단원들만 표시) ----------
-function renderTeacherScores(container, weeks, selectedQuizWeek, onWeekChange) {
+// ---------- 학생별 성적 (수업 날짜 선택 → 그 수업에 본 단원들 + 아래에 점수 분포) ----------
+// 기본 선택 = 직전 수업 (마지막 수업의 하나 전). 그 수업에 퀴즈가 없으면
+// 퀴즈가 있는 가장 가까운 이전 수업으로 내려간다.
+function renderTeacherScores(container, weeks, state, rerender) {
   const { teacher, academy } = session;
   const allQuizzes = sortQuizzes(academy.quizzes, academy.weeks);
   const rows = teacher.snapshot?.scores || [];
@@ -842,31 +905,62 @@ function renderTeacherScores(container, weeks, selectedQuizWeek, onWeekChange) {
     return;
   }
 
-  // 퀴즈가 있는 주차만 선택지로 (주차 미정 퀴즈는 '주차 미정' 그룹)
+  // 선택지: 수업 날짜(최신부터) → 수업일 없는 퀴즈 주차 → 주차 미정
+  const sess = teacherSessions(weeks);
+  const quizzesOfWeek = (w) => allQuizzes.filter((q) => q.weekId === w.id);
   const groups = [];
+  for (const s of [...sess].reverse()) {
+    groups.push({ key: s.date, label: fmtDateK(s.date), quizzes: quizzesOfWeek(s.week) });
+  }
+  const datedWeekIds = new Set(sess.map((s) => s.week.id));
   for (const w of weeks) {
-    const qs = allQuizzes.filter((q) => q.weekId === w.id);
-    if (qs.length) groups.push({ key: w.id, label: w.label, quizzes: qs });
+    if (!datedWeekIds.has(w.id) && quizzesOfWeek(w).length) {
+      groups.push({ key: `w:${w.id}`, label: `${w.label} (수업일 미입력)`, quizzes: quizzesOfWeek(w) });
+    }
   }
   const tbd = allQuizzes.filter((q) => !q.weekId || !weeks.some((w) => w.id === q.weekId));
   if (tbd.length) groups.push({ key: "", label: "주차 미정", quizzes: tbd });
-
-  const selected =
-    groups.find((g) => g.key === selectedQuizWeek) ||
-    groups.filter((g) => g.key !== "").pop() ||
-    groups[groups.length - 1];
-
-  const weekSel = el("select", { "aria-label": "퀴즈 주차 선택" });
-  for (const g of groups) {
-    weekSel.appendChild(el("option", { value: g.key, text: g.label, selected: g.key === selected.key }));
+  if (!groups.length) {
+    card.appendChild(el("p", { class: "empty", text: "등록된 수업일이 없습니다." }));
+    container.appendChild(card);
+    return;
   }
-  weekSel.addEventListener("change", () => onWeekChange(weekSel.value));
-  card.appendChild(el("div", { class: "week-select-row" }, [weekSel]));
+
+  // 기본값: 직전 수업 → 퀴즈가 없으면 이전 수업으로 fallback
+  if (!state.scoreKey || !groups.some((g) => g.key === state.scoreKey)) {
+    const lastIdx = lastPastSessionIdx(sess);
+    let pick = null;
+    if (lastIdx >= 0) {
+      for (let i = Math.max(0, lastIdx - 1); i >= 0; i--) {
+        if (quizzesOfWeek(sess[i].week).length) {
+          pick = sess[i].date;
+          break;
+        }
+      }
+    }
+    state.scoreKey = pick ?? groups.find((g) => g.quizzes.length)?.key ?? groups[0].key;
+  }
+  const selected = groups.find((g) => g.key === state.scoreKey);
+
+  const dateSel = el("select", { "aria-label": "수업 날짜 선택" });
+  for (const g of groups) {
+    dateSel.appendChild(el("option", { value: g.key, text: g.label, selected: g.key === selected.key }));
+  }
+  dateSel.addEventListener("change", () => {
+    state.scoreKey = dateSel.value;
+    rerender();
+  });
+  card.appendChild(el("div", { class: "week-select-row" }, [dateSel]));
   card.appendChild(
-    el("p", { class: "hint", text: "선택한 주차(수업)에 본 단원 퀴즈의 점수만 표시됩니다." })
+    el("p", { class: "hint", text: "선택한 수업 날짜에 본 단원 퀴즈의 점수만 표시됩니다." })
   );
 
   const quizzes = selected.quizzes;
+  if (!quizzes.length) {
+    card.appendChild(el("p", { class: "empty", text: "이 수업에 등록된 단원 퀴즈가 없습니다." }));
+    container.appendChild(card);
+    return;
+  }
   const tbl = el("table", { class: "grid" });
   tbl.appendChild(
     el("tr", {}, [
@@ -906,6 +1000,12 @@ function renderTeacherScores(container, weeks, selectedQuizWeek, onWeekChange) {
   tbl.appendChild(avgRow);
   card.appendChild(el("div", { class: "table-wrap" }, [tbl]));
   container.appendChild(card);
+
+  // 같은 날짜의 퀴즈 점수 분포 (익명 히스토그램) — 성적표 바로 아래
+  const distBox = el("div", { class: "t-dist" });
+  distBox.appendChild(el("h2", { class: "t-dist-title", text: "퀴즈 점수 분포" }));
+  renderQuizDistCards(distBox, quizzes);
+  container.appendChild(distBox);
 }
 
 // 스냅샷에서 특정 퀴즈의 점수 배열 (분포용)
@@ -915,25 +1015,15 @@ function quizScoreValues(quizId) {
     .filter((v) => v != null);
 }
 
-// ---------- 퀴즈 점수 분포 (익명 히스토그램) ----------
-function renderTeacherQuizDist(container) {
+// 퀴즈 점수 분포 카드 (익명 히스토그램)
+function renderQuizDistCards(container, quizzes) {
   const { academy } = session;
-  const quizzes = sortQuizzes(academy.quizzes, academy.weeks);
-  if (!quizzes.length) {
-    container.appendChild(
-      el("div", { class: "card" }, [
-        el("h2", { text: "퀴즈 점수 분포" }),
-        el("p", { class: "empty", text: "아직 등록된 퀴즈가 없습니다." }),
-      ])
-    );
-    return;
-  }
-  for (const q of [...quizzes].reverse()) {
+  for (const q of quizzes) {
     const scores = quizScoreValues(q.id);
     const card = el("div", { class: "card" }, [
       el("div", { class: "unit-title" }, [
         el("span", { text: q.unit }),
-        el("span", { class: "unit-week", text: shortLabel(weekLabelOf(academy.weeks, q.weekId)) }),
+        el("span", { class: "unit-week", text: shortLabel(weekLabelOf(academy.weeks, q.weekId)) || "주차 미정" }),
       ]),
     ]);
     if (scores.length) {

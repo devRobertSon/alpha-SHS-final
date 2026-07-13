@@ -341,6 +341,76 @@ li.hw-done .hw-text {
   font-size: 15px;
 }
 
+/* ---------- 선생님(열람) 출석 달력 ---------- */
+.cal {
+  max-width: 380px;
+  margin: 0 auto 12px;
+}
+.cal-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 6px;
+}
+.cal-title {
+  font-weight: 700;
+  font-size: 15px;
+}
+.cal-grid {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 2px;
+}
+.cal-dow {
+  text-align: center;
+  font-size: 11px;
+  color: var(--muted);
+  padding: 4px 0;
+}
+button.cal-day {
+  aspect-ratio: 1;
+  min-height: 34px;
+  border: none;
+  background: transparent;
+  border-radius: 10px;
+  font-size: 13px;
+  font-family: inherit;
+  color: var(--ink-2);
+  position: relative;
+}
+button.cal-day:disabled {
+  color: var(--muted);
+  opacity: 0.45;
+}
+button.cal-day.has-class {
+  background: var(--accent-wash);
+  color: var(--accent-strong);
+  font-weight: 600;
+  cursor: pointer;
+}
+button.cal-day.sel {
+  background: var(--accent);
+  color: #fff;
+}
+.cal-day .dot {
+  position: absolute;
+  left: 50%;
+  transform: translateX(-50%);
+  bottom: 4px;
+  width: 4px;
+  height: 4px;
+  border-radius: 999px;
+  background: currentColor;
+}
+.att-date-title {
+  font-size: 15px;
+  margin: 10px 0 6px;
+}
+.t-dist-title {
+  font-size: 17px;
+  margin: 16px 0 8px;
+}
+
 /* ---------- 선생님(열람) 대시보드 ---------- */
 .t-chip {
   display: inline-block;
