@@ -558,60 +558,82 @@ function toolbar(container, { withWeek = true } = {}) {
 }
 
 // ---------- 주차 관리 ----------
+// 전체 주차를 나열하면 학기가 지날수록 모달이 너무 길어지므로,
+// 주차를 선택해 그 주차 하나만 편집한다.
 function manageWeeks() {
   const blob = academyBlob();
   const overlay = el("div", { class: "modal-overlay" });
   const body = el("div");
+  let selId = S.selWeek.get(S.selAcademy) || null;
 
-  const renderList = () => {
+  const renderEditor = () => {
     clear(body);
     const weeks = sortWeeks(blob.weeks);
-    if (!weeks.length) body.appendChild(el("p", { class: "empty", text: "아직 주차가 없습니다." }));
-    for (const w of weeks) {
-      const labelIn = el("input", { type: "text", value: w.label });
-      const sessIn = el("input", {
-        type: "text",
-        value: (w.sessions || []).join(", "),
-        placeholder: "수업일: 2026-07-07, 2026-07-10",
-      });
-      const save = () => {
-        w.label = labelIn.value.trim() || w.label;
-        const dates = sessIn.value
-          .split(",")
-          .map((s) => s.trim())
-          .filter((s) => /^\d{4}-\d{2}-\d{2}$/.test(s))
-          .sort();
-        w.sessions = dates;
-        markAcademy(S.selAcademy);
-        toast("저장되었습니다.", "ok");
-      };
-      body.appendChild(
-        el("div", { class: "card", style: "padding:10px" }, [
-          el("div", { class: "hint", text: `ID: ${w.id}` }),
-          el("div", { class: "item-row" }, [labelIn]),
-          el("div", { class: "item-row" }, [sessIn]),
-          el("div", { class: "item-row" }, [
-            el("button", { class: "btn btn-small", text: "저장", onclick: save }),
-            el("button", {
-              class: "btn btn-small btn-danger",
-              text: "삭제",
-              onclick: async () => {
-                const ok = await confirmModal({
-                  title: "주차 삭제",
-                  body: `'${w.label}'을(를) 삭제할까요? 이 주차의 숙제·점수 표시가 사라집니다. (학생 데이터 자체는 남아 있습니다)`,
-                  okText: "삭제",
-                  danger: true,
-                });
-                if (!ok) return;
-                blob.weeks = blob.weeks.filter((x) => x.id !== w.id);
-                markAcademy(S.selAcademy);
-                renderList();
-              },
-            }),
-          ]),
-        ])
-      );
+    if (!weeks.length) {
+      body.appendChild(el("p", { class: "empty", text: "아직 주차가 없습니다. '+ 새 주차'로 추가해 주세요." }));
+      return;
     }
+    if (!weeks.some((x) => x.id === selId)) selId = weeks[weeks.length - 1].id;
+
+    const weekSel = el("select", { "aria-label": "관리할 주차 선택" });
+    for (const x of weeks) {
+      weekSel.appendChild(el("option", { value: x.id, text: x.label, selected: x.id === selId }));
+    }
+    weekSel.addEventListener("change", () => {
+      selId = weekSel.value;
+      renderEditor();
+    });
+    body.appendChild(el("div", { class: "item-row" }, [weekSel]));
+    body.appendChild(
+      el("p", { class: "hint", text: `총 ${weeks.length}개 주차 — 선택한 주차만 아래에서 편집합니다.` })
+    );
+
+    const w = weeks.find((x) => x.id === selId);
+    const labelIn = el("input", { type: "text", value: w.label });
+    const sessIn = el("input", {
+      type: "text",
+      value: (w.sessions || []).join(", "),
+      placeholder: "수업일: 2026-07-07, 2026-07-10",
+    });
+    const save = () => {
+      w.label = labelIn.value.trim() || w.label;
+      const dates = sessIn.value
+        .split(",")
+        .map((s) => s.trim())
+        .filter((s) => /^\d{4}-\d{2}-\d{2}$/.test(s))
+        .sort();
+      w.sessions = dates;
+      markAcademy(S.selAcademy);
+      toast("저장되었습니다.", "ok");
+      renderEditor(); // 라벨 변경을 선택 목록에 반영
+    };
+    body.appendChild(
+      el("div", { class: "card", style: "padding:10px" }, [
+        el("div", { class: "hint", text: `ID: ${w.id}` }),
+        el("label", { class: "field" }, [el("span", { text: "주차 이름" }), labelIn]),
+        el("label", { class: "field" }, [el("span", { text: "수업일 (쉼표로 구분)" }), sessIn]),
+        el("div", { class: "item-row" }, [
+          el("button", { class: "btn btn-small", text: "저장", onclick: save }),
+          el("button", {
+            class: "btn btn-small btn-danger",
+            text: "이 주차 삭제",
+            onclick: async () => {
+              const ok = await confirmModal({
+                title: "주차 삭제",
+                body: `'${w.label}'을(를) 삭제할까요? 이 주차의 숙제·점수 표시가 사라집니다. (학생 데이터 자체는 남아 있습니다)`,
+                okText: "삭제",
+                danger: true,
+              });
+              if (!ok) return;
+              blob.weeks = blob.weeks.filter((x) => x.id !== w.id);
+              selId = null; // 최신 주차로 되돌아감
+              markAcademy(S.selAcademy);
+              renderEditor();
+            },
+          }),
+        ]),
+      ])
+    );
   };
 
   const addWeek = () => {
@@ -636,8 +658,9 @@ function manageWeeks() {
       progress: "",
     });
     S.selWeek.set(S.selAcademy, id);
+    selId = id; // 새 주차를 바로 편집
     markAcademy(S.selAcademy);
-    renderList();
+    renderEditor();
   };
 
   overlay.appendChild(
@@ -657,7 +680,7 @@ function manageWeeks() {
       ]),
     ])
   );
-  renderList();
+  renderEditor();
   document.body.appendChild(overlay);
 }
 
