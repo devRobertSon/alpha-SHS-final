@@ -270,8 +270,13 @@ function renderHomework(container, weeks) {
     return;
   }
   card.appendChild(
-    el("p", { class: "hint", text: "선생님이 수업 시간에 확인 후 체크합니다. (최신 주차부터)" })
+    el("p", { class: "hint", text: "선생님이 수업 시간에 확인 후 체크합니다. (최근 수업부터)" })
   );
+  // 블록 제목: 주차 이름 대신 그 주 첫 수업 날짜 (예: "7월 12일 숙제")
+  const hwBlockTitle = (week) => {
+    const ss = week.sessions || [];
+    return ss.length ? `${fmtDateK(ss[0])} 숙제` : `${week.label} 숙제`;
+  };
   let anyHold = false;
   for (const week of withHw) {
     const items = week.homework;
@@ -281,7 +286,7 @@ function renderHomework(container, weeks) {
     if (holdCount) anyHold = true;
     const block = el("div", { class: "week-block" }, [
       el("div", { class: "wb-head" }, [
-        el("span", { class: "wb-label", text: week.label }),
+        el("span", { class: "wb-label", text: hwBlockTitle(week) }),
         el("button", {
           class: "btn btn-small",
           text: "📋 복사",
@@ -352,22 +357,17 @@ function renderQuiz(container) {
     );
   }
 
-  // 추이 그래프 (단원 응시 순, 만점 = 실제 퀴즈 만점 기준)
+  // 추이 그래프 (단원 응시 순, 만점 = 실제 퀴즈 만점 기준, x축 = 축약 단원명 줄바꿈 표시)
   card.appendChild(el("h2", { text: "점수 추이" }));
   const chartBox = el("div");
   card.appendChild(chartBox);
   renderScoreChart(chartBox, {
-    weeks: quizzes.map((q) => ({ id: q.id, label: q.unit })),
+    weeks: quizzes.map((q) => ({ id: q.id, label: unitShort(q.unit) })),
     mine: quizzes.map((q) => (myScores[q.id] != null ? myScores[q.id] : null)),
     avg: quizzes.map((q) => (q.stats?.avg != null ? q.stats.avg : null)),
     yMax: Math.max(...quizzes.map((q) => q.max || 100)),
   });
 
-  // 단원명에서 "-" 앞부분(과목 접두어) 제거: "물리 - 여러 가지 힘" → "여러 가지 힘"
-  const unitShort = (unit) => {
-    const m = String(unit || "").match(/[-–—]\s*(.+)$/);
-    return m ? m[1].trim() : unit;
-  };
   // 주차 대신 날짜: 라벨의 괄호 안 날짜 → 수업일 범위 → 라벨 순으로 사용
   const quizDateText = (q) => {
     const w = (academy.weeks || []).find((x) => x.id === q.weekId);
@@ -415,6 +415,12 @@ function renderQuiz(container) {
 
 function round1(v) {
   return Math.round(v * 10) / 10;
+}
+
+// 단원명에서 "-" 앞부분(과목 접두어) 제거: "물리 - 여러 가지 힘" → "여러 가지 힘"
+function unitShort(unit) {
+  const m = String(unit || "").match(/[-–—]\s*(.+)$/);
+  return m ? m[1].trim() : unit;
 }
 
 function shortLabel(label) {

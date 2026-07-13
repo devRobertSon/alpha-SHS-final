@@ -23,18 +23,28 @@ export function renderScoreChart(container, { weeks, mine, avg, yMax = 100 }) {
   }
 
   const W = 360;
-  const H = 230;
   const M = { top: 14, right: 14, bottom: 30, left: 34 };
   const iw = W - M.left - M.right;
-  const ih = H - M.top - M.bottom;
+
+  // X 라벨: 모든 단원을 적되, 칸 너비에 맞춰 단어 단위 줄바꿈으로 겹침 방지.
+  // 개수가 많으면 위/아래 두 단(지그재그)으로 나눠 이웃 라벨과 세로로 어긋나게 한다.
+  const slot = n === 1 ? iw : iw / (n - 1);
+  const fontX = 9;
+  const lineH = fontX + 3;
+  const stagger = n > 4;
+  const budget = Math.max(20, stagger ? slot * 2 - 10 : slot - 4);
+  const maxChars = Math.max(2, Math.floor(budget / (fontX * 0.95)));
+  const labelLines = weeks.map((w) =>
+    wrapLabel(String(w.label).replace(/\s*\(.*\)\s*/, ""), maxChars)
+  );
+  const maxLines = Math.max(1, ...labelLines.map((l) => l.length));
+  const bands = stagger ? 2 : 1;
+  M.bottom = 14 + bands * maxLines * lineH + 4;
+
+  const ih = 186;
+  const H = M.top + ih + M.bottom;
   const x = (i) => M.left + (n === 1 ? iw / 2 : (i / (n - 1)) * iw);
   const y = (v) => M.top + ih - (Math.max(0, Math.min(v, yMax)) / yMax) * ih;
-
-  // 라벨 축약: 괄호 제거 + 길면 줄임표 (단원명이 길어 겹치는 것 방지)
-  const short = (label) => {
-    const t = String(label).replace(/\s*\(.*\)\s*/, "");
-    return t.length > 7 ? t.slice(0, 6) + "…" : t;
-  };
 
   let s = "";
   // 가로 그리드 (hairline, 5분할)
@@ -48,17 +58,16 @@ export function renderScoreChart(container, { weeks, mine, avg, yMax = 100 }) {
       COLOR.tick
     }">${Math.round(g * step)}</text>`;
   }
-  // X 라벨 (겹치지 않게 솎아내기, 양 끝은 잘리지 않게 정렬)
-  // 마지막 라벨은 항상 표시하되, 그 직전 라벨이 붙어서 겹치지 않도록 마지막과
-  // every 미만 간격인 중간 라벨은 건너뛴다
-  const every = Math.max(1, Math.ceil(n / 4));
+  // X 라벨 렌더 (여러 줄 tspan, 양 끝은 잘리지 않게 정렬)
   for (let i = 0; i < n; i++) {
-    if (i !== n - 1 && (i % every !== 0 || n - 1 - i < every)) continue;
     const anchor = i === 0 ? "start" : i === n - 1 ? "end" : "middle";
     const tx = i === 0 ? Math.min(x(i), M.left) : x(i);
-    s += `<text x="${tx}" y="${H - M.bottom + 16}" text-anchor="${anchor}" font-size="10" fill="${
-      COLOR.tick
-    }">${escapeXML(short(weeks[i].label))}</text>`;
+    const band = stagger ? i % 2 : 0;
+    const baseY = M.top + ih + 13 + band * (maxLines * lineH);
+    const spans = labelLines[i]
+      .map((ln, k) => `<tspan x="${tx}" dy="${k === 0 ? 0 : lineH}">${escapeXML(ln)}</tspan>`)
+      .join("");
+    s += `<text x="${tx}" y="${baseY}" text-anchor="${anchor}" font-size="${fontX}" fill="${COLOR.tick}">${spans}</text>`;
   }
 
   // null이 끼면 선을 끊는다 (0으로 그리지 않음)
@@ -188,6 +197,41 @@ function legendLine(color, dashed) {
   return `<svg viewBox="0 0 28 10" width="28" height="10" aria-hidden="true"><line x1="1" y1="5" x2="27" y2="5" stroke="${color}" stroke-width="2"${
     dashed ? ' stroke-dasharray="5 4"' : ""
   }/>${dashed ? "" : `<circle cx="14" cy="5" r="3.5" fill="${color}" stroke="#fcfcfb" stroke-width="1.5"/>`}</svg>`;
+}
+
+// 단어 단위 줄바꿈 (한 줄 maxChars 이내, 최대 maxLines줄 — 넘치면 마지막 줄에 …)
+function wrapLabel(text, maxChars, maxLines = 3) {
+  const words = String(text).trim().split(/\s+/).filter(Boolean);
+  const lines = [];
+  let cur = "";
+  const push = () => {
+    if (cur) {
+      lines.push(cur);
+      cur = "";
+    }
+  };
+  for (let wd of words) {
+    while (wd.length > maxChars) {
+      push();
+      lines.push(wd.slice(0, maxChars));
+      wd = wd.slice(maxChars);
+    }
+    if (!wd) continue;
+    if (!cur) cur = wd;
+    else if (cur.length + 1 + wd.length <= maxChars) cur += " " + wd;
+    else {
+      push();
+      cur = wd;
+    }
+  }
+  push();
+  if (!lines.length) lines.push("");
+  if (lines.length > maxLines) {
+    const cut = lines.slice(0, maxLines);
+    cut[maxLines - 1] = cut[maxLines - 1].slice(0, Math.max(1, maxChars - 1)) + "…";
+    return cut;
+  }
+  return lines;
 }
 
 function escapeXML(s) {
