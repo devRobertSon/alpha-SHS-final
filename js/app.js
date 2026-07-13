@@ -340,7 +340,7 @@ function renderQuiz(container) {
     card.appendChild(
       el("p", {
         class: "hint",
-        text: `최근 퀴즈 · ${latest.unit} (${shortLabel(weekLabelOf(academy.weeks, latest.weekId))})`,
+        text: `최근 퀴즈 · ${latest.unit} (${shortLabel(weekLabelOf(academy.weeks, latest.weekId)) || "주차 미정"})`,
       })
     );
     card.appendChild(
@@ -378,7 +378,7 @@ function renderQuiz(container) {
     tbl.appendChild(
       el("tr", {}, [
         el("td", { class: "name-cell", text: q.unit }),
-        el("td", { text: shortLabel(weekLabelOf(academy.weeks, q.weekId)) }),
+        el("td", { text: shortLabel(weekLabelOf(academy.weeks, q.weekId)) || "미정" }),
         el("td", {
           class: "num",
           text:
@@ -465,7 +465,7 @@ function renderReport(container) {
       const sec = el("div", { class: "unit-report" }, [
         el("div", { class: "unit-title" }, [
           el("span", { text: q.unit }),
-          el("span", { class: "unit-week", text: shortLabel(weekLabelOf(academy.weeks, q.weekId)) }),
+          el("span", { class: "unit-week", text: shortLabel(weekLabelOf(academy.weeks, q.weekId)) || "주차 미정" }),
         ]),
       ]);
       if (rep.pdf) {
