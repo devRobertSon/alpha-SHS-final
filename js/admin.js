@@ -386,7 +386,7 @@ function selectedQuiz() {
 
 function quizOptionLabel(q) {
   const wl = weekLabelOf(academyBlob()?.weeks, q.weekId).replace(/\s*\(.*\)\s*/, "");
-  return wl ? `${q.unit} — ${wl}` : q.unit;
+  return `${q.unit} — ${wl || "주차 미정"}`;
 }
 
 // 학원 + 퀴즈(단원) 선택 툴바
@@ -420,28 +420,29 @@ function quizToolbar(container) {
 }
 
 // 같은 퀴즈(단원명·주차·만점)를 다른 학원들에도 만든다.
-// 대상 학원에 같은 주차(id)가 없으면 주차도 함께 만든다 (수업일은 비워 둠).
-// 같은 주차에 같은 단원명이 이미 있으면 건너뛴다 (중복 방지).
+// weekId가 null이면 '주차 미정' 상태로 만든다 (주차 생성 불필요).
+// 주차가 정해진 경우, 대상 학원에 같은 주차(id)가 없으면 주차도 함께 만든다 (수업일은 비워 둠).
+// 같은 단원명이 이미 있으면 건너뛴다 — 전체 평균이 단원명 기준으로 합산되므로 중복 금지.
 // 반환: { made: [학원명], weekMade: [학원명] }
 function copyQuizToOtherAcademies(unit, weekId, max) {
   const norm = (s) => String(s || "").trim().replace(/\s+/g, " ");
-  const srcWeek = (academyBlob().weeks || []).find((w) => w.id === weekId);
+  const srcWeek = weekId ? (academyBlob().weeks || []).find((w) => w.id === weekId) : null;
   const made = [];
   const weekMade = [];
   for (const a of S.roster.academies) {
     if (a.fileId === S.selAcademy) continue;
     const ab = S.academies.get(a.fileId);
     if (!ab) continue;
-    ab.weeks = ab.weeks || [];
-    let w = ab.weeks.find((x) => x.id === weekId);
-    if (!w) {
-      w = { id: srcWeek.id, label: srcWeek.label, sessions: [], homework: [], progress: "" };
-      ab.weeks.push(w);
-      weekMade.push(a.name);
+    if (weekId && srcWeek) {
+      ab.weeks = ab.weeks || [];
+      if (!ab.weeks.find((x) => x.id === weekId)) {
+        ab.weeks.push({ id: srcWeek.id, label: srcWeek.label, sessions: [], homework: [], progress: "" });
+        weekMade.push(a.name);
+      }
     }
     ab.quizzes = ab.quizzes || [];
-    if (ab.quizzes.some((x) => x.weekId === weekId && norm(x.unit) === norm(unit))) continue;
-    ab.quizzes.push({ id: randomHexId(6), unit, weekId, max, stats: null });
+    if (ab.quizzes.some((x) => norm(x.unit) === norm(unit))) continue;
+    ab.quizzes.push({ id: randomHexId(6), unit, weekId: weekId || null, max, stats: null });
     markAcademy(a.fileId);
     made.push(a.name);
   }
@@ -459,17 +460,17 @@ function copyResultToast(unit, { made, weekMade }) {
 }
 
 // 퀴즈(단원) 생성/편집/삭제 모달
+// 응시 주차는 '미정'(weekId=null)으로 둘 수 있다 — 두 학원의 응시 시점이 다르거나
+// 아직 날짜를 정하지 않은 퀴즈를 미리 등록하는 용도. 나중에 여기서 주차를 지정한다.
 function editQuiz(quiz) {
   const blob = academyBlob();
   const weeks = sortWeeks(blob.weeks);
-  if (!weeks.length) {
-    toast("먼저 '주차 관리'(숙제/출석 탭)에서 주차를 만들어 주세요.", "error");
-    return;
-  }
   const multiAcademy = S.roster.academies.length > 1;
   const unitIn = el("input", { type: "text", value: quiz?.unit || "", placeholder: "단원명 (예: 화학 — 몰 농도)" });
   const weekSel = el("select");
-  const defaultWeek = quiz?.weekId || selectedWeek()?.id;
+  // 기존 퀴즈는 저장된 주차(없으면 미정), 새 퀴즈는 현재 선택된 주차를 기본값으로
+  const defaultWeek = quiz ? quiz.weekId || "" : selectedWeek()?.id || "";
+  weekSel.appendChild(el("option", { value: "", text: "주차 미정 (나중에 지정)", selected: defaultWeek === "" }));
   for (const w of weeks) {
     weekSel.appendChild(el("option", { value: w.id, text: w.label, selected: w.id === defaultWeek }));
   }
@@ -497,7 +498,7 @@ function editQuiz(quiz) {
             onclick: () => {
               const unit = unitIn.value.trim();
               if (!unit) return (err.textContent = "단원명을 입력해 주세요.");
-              const result = copyQuizToOtherAcademies(unit, weekSel.value, parseFloat(maxIn.value) || 100);
+              const result = copyQuizToOtherAcademies(unit, weekSel.value || null, parseFloat(maxIn.value) || 100);
               copyResultToast(unit, result);
               overlay.remove();
               renderTab();
@@ -531,22 +532,23 @@ function editQuiz(quiz) {
           onclick: () => {
             const unit = unitIn.value.trim();
             const max = parseFloat(maxIn.value) || 100;
+            const weekId = weekSel.value || null; // "" = 주차 미정
             if (!unit) return (err.textContent = "단원명을 입력해 주세요.");
             if (quiz) {
-              if (quiz.unit !== unit || quiz.weekId !== weekSel.value || quiz.max !== max) {
+              if (quiz.unit !== unit || quiz.weekId !== weekId || quiz.max !== max) {
                 quiz.unit = unit;
-                quiz.weekId = weekSel.value;
+                quiz.weekId = weekId;
                 quiz.max = max;
                 markAcademy(S.selAcademy);
               }
             } else {
-              const q = { id: randomHexId(6), unit, weekId: weekSel.value, max, stats: null };
+              const q = { id: randomHexId(6), unit, weekId, max, stats: null };
               blob.quizzes = blob.quizzes || [];
               blob.quizzes.push(q);
               S.selQuiz.set(S.selAcademy, q.id);
               markAcademy(S.selAcademy);
               if (multiAcademy && allChk.checked) {
-                copyResultToast(unit, copyQuizToOtherAcademies(unit, weekSel.value, max));
+                copyResultToast(unit, copyQuizToOtherAcademies(unit, weekId, max));
               }
             }
             overlay.remove();
@@ -1101,7 +1103,7 @@ function renderScoresTab(container) {
     return;
   }
   card.appendChild(
-    el("p", { class: "hint", text: `단원: ${quiz.unit} · 응시 주차: ${weekLabelOf(academyBlob().weeks, quiz.weekId)} · 만점 ${quiz.max}점 (변경은 '퀴즈 관리')` })
+    el("p", { class: "hint", text: `단원: ${quiz.unit} · 응시 주차: ${weekLabelOf(academyBlob().weeks, quiz.weekId) || "미정"} · 만점 ${quiz.max}점 (변경은 '퀴즈 관리')` })
   );
 
   const students = activeStudentsOf(S.selAcademy);
@@ -1571,7 +1573,7 @@ function renderReportsTab(container) {
     container.appendChild(card);
     return;
   }
-  card.appendChild(el("p", { class: "hint", text: `단원: ${quiz.unit} · 응시 주차: ${weekLabelOf(academyBlob().weeks, quiz.weekId)}` }));
+  card.appendChild(el("p", { class: "hint", text: `단원: ${quiz.unit} · 응시 주차: ${weekLabelOf(academyBlob().weeks, quiz.weekId) || "미정"}` }));
   const students = activeStudentsOf(S.selAcademy);
   if (!students.length) {
     card.appendChild(el("p", { class: "empty", text: "학생이 없습니다." }));

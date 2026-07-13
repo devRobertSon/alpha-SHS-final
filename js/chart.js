@@ -49,9 +49,11 @@ export function renderScoreChart(container, { weeks, mine, avg, yMax = 100 }) {
     }">${Math.round(g * step)}</text>`;
   }
   // X 라벨 (겹치지 않게 솎아내기, 양 끝은 잘리지 않게 정렬)
+  // 마지막 라벨은 항상 표시하되, 그 직전 라벨이 붙어서 겹치지 않도록 마지막과
+  // every 미만 간격인 중간 라벨은 건너뛴다
   const every = Math.max(1, Math.ceil(n / 4));
   for (let i = 0; i < n; i++) {
-    if (i % every !== 0 && i !== n - 1) continue;
+    if (i !== n - 1 && (i % every !== 0 || n - 1 - i < every)) continue;
     const anchor = i === 0 ? "start" : i === n - 1 ? "end" : "middle";
     const tx = i === 0 ? Math.min(x(i), M.left) : x(i);
     s += `<text x="${tx}" y="${H - M.bottom + 16}" text-anchor="${anchor}" font-size="10" fill="${

@@ -428,7 +428,8 @@ function renderTrend(data, maxScore) {
     }
     const anchor = i === 0 ? "start" : i === n - 1 ? "end" : "middle";
     const every = Math.max(1, Math.ceil(n / 4));
-    if (i % every === 0 || i === n - 1) {
+    // 마지막 라벨과 겹치는 직전 라벨은 건너뛴다 (chart.js와 동일 규칙)
+    if (i === n - 1 || (i % every === 0 && n - 1 - i >= every)) {
       s += `<text x="${x(i)}" y="${H - M.bottom + 13}" text-anchor="${anchor}" font-size="9" fill="#898781">${escapeXML(shorten(d.label))}</text>`;
     }
   });
