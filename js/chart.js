@@ -23,23 +23,27 @@ export function renderScoreChart(container, { weeks, mine, avg, yMax = 100 }) {
   }
 
   const W = 360;
-  const M = { top: 14, right: 14, bottom: 30, left: 34 };
-  const iw = W - M.left - M.right;
-
-  // X 라벨: 모든 단원을 적되, 칸 너비에 맞춰 단어 단위 줄바꿈으로 겹침 방지.
-  // 개수가 많으면 위/아래 두 단(지그재그)으로 나눠 이웃 라벨과 세로로 어긋나게 한다.
-  const slot = n === 1 ? iw : iw / (n - 1);
   const fontX = 9;
   const lineH = fontX + 3;
-  const stagger = n > 4;
-  const budget = Math.max(20, stagger ? slot * 2 - 10 : slot - 4);
-  const maxChars = Math.max(2, Math.floor(budget / (fontX * 0.95)));
+  const charW = fontX * 0.95;
+
+  // X 라벨: 모든 단원을 같은 높이에서 시작해 표시한다.
+  // 각 라벨의 가로 폭은 점 간격 안으로 좁게 잡고, 이름이 길면 단어 단위로
+  // 계속 줄바꿈해 아래로 길어진다 (겹침 없음).
+  const iw0 = W - 34 - 14;
+  const slot0 = n === 1 ? iw0 : iw0 / (n - 1);
+  const budget = Math.max(18, Math.min(slot0 - 6, 90)); // 라벨 한 줄 최대 폭(px)
+  const maxChars = Math.max(2, Math.floor(budget / charW));
+  const half = (maxChars * charW) / 2;
+  // 라벨이 가운데 정렬이므로 양 끝 라벨이 잘리지 않게 여백을 라벨 반폭만큼 확보
+  const M = { top: 14, right: Math.max(14, half + 2), bottom: 30, left: Math.max(34, half + 2) };
+  const iw = W - M.left - M.right;
+
   const labelLines = weeks.map((w) =>
-    wrapLabel(String(w.label).replace(/\s*\(.*\)\s*/, ""), maxChars)
+    wrapLabel(String(w.label).replace(/\s*\(.*\)\s*/, ""), maxChars, 99)
   );
   const maxLines = Math.max(1, ...labelLines.map((l) => l.length));
-  const bands = stagger ? 2 : 1;
-  M.bottom = 14 + bands * maxLines * lineH + 4;
+  M.bottom = 14 + maxLines * lineH + 4;
 
   const ih = 186;
   const H = M.top + ih + M.bottom;
@@ -58,16 +62,14 @@ export function renderScoreChart(container, { weeks, mine, avg, yMax = 100 }) {
       COLOR.tick
     }">${Math.round(g * step)}</text>`;
   }
-  // X 라벨 렌더 (여러 줄 tspan, 양 끝은 잘리지 않게 정렬)
+  // X 라벨 렌더: 모두 같은 높이에서 시작, 가운데 정렬, 줄바꿈은 아래로
   for (let i = 0; i < n; i++) {
-    const anchor = i === 0 ? "start" : i === n - 1 ? "end" : "middle";
-    const tx = i === 0 ? Math.min(x(i), M.left) : x(i);
-    const band = stagger ? i % 2 : 0;
-    const baseY = M.top + ih + 13 + band * (maxLines * lineH);
+    const tx = x(i);
+    const baseY = M.top + ih + 13;
     const spans = labelLines[i]
       .map((ln, k) => `<tspan x="${tx}" dy="${k === 0 ? 0 : lineH}">${escapeXML(ln)}</tspan>`)
       .join("");
-    s += `<text x="${tx}" y="${baseY}" text-anchor="${anchor}" font-size="${fontX}" fill="${COLOR.tick}">${spans}</text>`;
+    s += `<text x="${tx}" y="${baseY}" text-anchor="middle" font-size="${fontX}" fill="${COLOR.tick}">${spans}</text>`;
   }
 
   // null이 끼면 선을 끊는다 (0으로 그리지 않음)
