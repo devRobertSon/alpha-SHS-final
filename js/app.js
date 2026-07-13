@@ -333,26 +333,26 @@ function renderQuiz(container) {
     return;
   }
 
-  // 최근 응시 퀴즈 요약
+  // 요약: 지금까지 본 모든 퀴즈 기준 — 내 점수 평균 vs 전체 평균(전 퀴즈 평균의 평균)
   const taken = quizzes.filter((q) => myScores[q.id] != null);
-  const latest = taken.length ? taken[taken.length - 1] : null;
-  if (latest) {
+  if (taken.length) {
+    const myAvg = round1(taken.reduce((a, q) => a + myScores[q.id], 0) / taken.length);
+    const withStats = quizzes.filter((q) => q.stats?.avg != null);
+    const allAvg = withStats.length
+      ? round1(withStats.reduce((a, q) => a + q.stats.avg, 0) / withStats.length)
+      : null;
     card.appendChild(
-      el("p", {
-        class: "hint",
-        text: `최근 퀴즈 · ${latest.unit} (${shortLabel(weekLabelOf(academy.weeks, latest.weekId)) || "주차 미정"})`,
-      })
+      el("p", { class: "hint", text: `지금까지 응시한 단원 퀴즈 ${taken.length}개 기준` })
     );
     card.appendChild(
-      el("div", { class: "stat-row" }, [
-        statTile("내 점수", String(myScores[latest.id]), `만점 ${latest.max || 100}`),
-        statTile("전체 평균", latest.stats?.avg != null ? String(latest.stats.avg) : "–", ""),
-        statTile("응시 인원", latest.stats?.count != null ? `${latest.stats.count}명` : "–", ""),
+      el("div", { class: "stat-row two" }, [
+        statTile("내 평균", String(myAvg), ""),
+        statTile("전체 평균", allAvg != null ? String(allAvg) : "–", ""),
       ])
     );
   }
 
-  // 추이 그래프 (단원 응시 순)
+  // 추이 그래프 (단원 응시 순, 만점 = 실제 퀴즈 만점 기준)
   card.appendChild(el("h2", { text: "점수 추이" }));
   const chartBox = el("div");
   card.appendChild(chartBox);
@@ -360,25 +360,41 @@ function renderQuiz(container) {
     weeks: quizzes.map((q) => ({ id: q.id, label: q.unit })),
     mine: quizzes.map((q) => (myScores[q.id] != null ? myScores[q.id] : null)),
     avg: quizzes.map((q) => (q.stats?.avg != null ? q.stats.avg : null)),
-    yMax: Math.max(100, ...quizzes.map((q) => q.max || 0)),
+    yMax: Math.max(...quizzes.map((q) => q.max || 100)),
   });
 
-  // 전체 목록 (최신 순)
+  // 단원명에서 "-" 앞부분(과목 접두어) 제거: "물리 - 여러 가지 힘" → "여러 가지 힘"
+  const unitShort = (unit) => {
+    const m = String(unit || "").match(/[-–—]\s*(.+)$/);
+    return m ? m[1].trim() : unit;
+  };
+  // 주차 대신 날짜: 라벨의 괄호 안 날짜 → 수업일 범위 → 라벨 순으로 사용
+  const quizDateText = (q) => {
+    const w = (academy.weeks || []).find((x) => x.id === q.weekId);
+    if (!w) return "미정";
+    const m = (w.label || "").match(/\(([^)]+)\)/);
+    if (m) return m[1];
+    const ss = w.sessions || [];
+    const f = (d) => `${parseInt(d.slice(5, 7), 10)}/${parseInt(d.slice(8, 10), 10)}`;
+    if (ss.length) return ss.length > 1 ? `${f(ss[0])}~${f(ss[ss.length - 1])}` : f(ss[0]);
+    return shortLabel(w.label) || "미정";
+  };
+
+  // 전체 목록 (최신 순): 단원 | 내 점수 | 전체 평균 | 날짜
   card.appendChild(el("h2", { text: "퀴즈 목록", style: "margin-top:16px" }));
   const tbl = el("table", { class: "grid" });
   tbl.appendChild(
     el("tr", {}, [
       el("th", { class: "name-cell", text: "단원" }),
-      el("th", { text: "주차" }),
       el("th", { text: "내 점수" }),
       el("th", { text: "전체 평균" }),
+      el("th", { text: "날짜" }),
     ])
   );
   for (const q of [...quizzes].reverse()) {
     tbl.appendChild(
       el("tr", {}, [
-        el("td", { class: "name-cell", text: q.unit }),
-        el("td", { text: shortLabel(weekLabelOf(academy.weeks, q.weekId)) || "미정" }),
+        el("td", { class: "name-cell", text: unitShort(q.unit) }),
         el("td", {
           class: "num",
           text:
@@ -389,11 +405,16 @@ function renderQuiz(container) {
                 : "–",
         }),
         el("td", { class: "num", text: q.stats?.avg != null ? String(q.stats.avg) : "–" }),
+        el("td", { text: quizDateText(q) }),
       ])
     );
   }
   card.appendChild(el("div", { class: "table-wrap" }, [tbl]));
   container.appendChild(card);
+}
+
+function round1(v) {
+  return Math.round(v * 10) / 10;
 }
 
 function shortLabel(label) {
@@ -600,6 +621,7 @@ function renderTeacherDashboard() {
     ])
   );
 
+  let selectedQuizWeek = null; // 학생별 성적 탭의 주차 선택 (null = 기본값)
   const content = el("div", { id: "tab-content" });
   const renderTab = (id) => {
     clear(content);
@@ -607,11 +629,11 @@ function renderTeacherDashboard() {
       selectedWeekId = wid;
       renderTab("att");
     });
-    else if (id === "hw") renderTeacherHomework(content, weeks, selectedWeekId, (wid) => {
-      selectedWeekId = wid;
-      renderTab("hw");
+    else if (id === "hw") renderTeacherHomework(content, weeks);
+    else if (id === "scores") renderTeacherScores(content, weeks, selectedQuizWeek, (v) => {
+      selectedQuizWeek = v;
+      renderTab("scores");
     });
-    else if (id === "scores") renderTeacherScores(content);
     else if (id === "dist") renderTeacherQuizDist(content);
     else if (id === "reports") renderTeacherReports(content);
     else if (id === "notice") renderNotices(content);
@@ -685,68 +707,82 @@ function renderTeacherAttendance(container, weeks, selectedWeekId, onWeekChange)
   container.appendChild(card);
 }
 
-// ---------- 숙제 체크 현황 (학생×항목 표) ----------
-function renderTeacherHomework(container, weeks, selectedWeekId, onWeekChange) {
+// ---------- 숙제 체크 현황 (학생×주차 완료율 매트릭스 — 좌우 스크롤) ----------
+function renderTeacherHomework(container, weeks) {
   const { teacher } = session;
   const card = el("div", { class: "card" }, [el("h2", { text: "숙제 체크 현황" })]);
-  if (!weeks.length) {
-    card.appendChild(el("p", { class: "empty", text: "등록된 주차가 없습니다." }));
+  const hwWeeks = [...weeks].reverse().filter((w) => (w.homework || []).length);
+  if (!hwWeeks.length) {
+    card.appendChild(el("p", { class: "empty", text: "등록된 숙제가 없습니다." }));
     container.appendChild(card);
     return;
   }
-  const weekSel = el("select", { "aria-label": "주차 선택" });
-  for (const w of weeks) {
-    weekSel.appendChild(el("option", { value: w.id, text: w.label, selected: w.id === selectedWeekId }));
-  }
-  weekSel.addEventListener("change", () => onWeekChange(weekSel.value));
-  card.appendChild(el("div", { class: "week-select-row" }, [weekSel]));
+  card.appendChild(
+    el("p", { class: "hint", text: "주차(수업)별 숙제 완료율입니다. 최신 주차부터 — 옆으로 밀어서 지난 주차를 보세요." })
+  );
 
-  const week = weeks.find((w) => w.id === selectedWeekId) || weeks[weeks.length - 1];
-  const items = week.homework || [];
-  const rows = teacher.snapshot?.homework?.[week.id] || [];
-  if (!items.length || !rows.length) {
-    card.appendChild(el("p", { class: "empty", text: "이 주차에 등록된 숙제가 없습니다." }));
-  } else {
-    card.appendChild(
-      el("ol", { class: "rd-list", style: "font-size:14px;padding-left:20px" },
-        items.map((it) => el("li", { text: it.text })))
-    );
-    const tbl = el("table", { class: "grid" });
+  // 주차별 이름→체크상태 맵 (스냅샷은 주차 단위 배열)
+  const byWeek = new Map(); // weekId -> Map(name -> byItem)
+  const names = [];
+  for (const w of hwWeeks) {
+    const m = new Map();
+    for (const r of teacher.snapshot?.homework?.[w.id] || []) {
+      m.set(r.name, r.byItem || {});
+      if (!names.includes(r.name)) names.push(r.name);
+    }
+    byWeek.set(w.id, m);
+  }
+
+  // 학생·주차별 완료율 (◌ 확인 전은 분모에서 제외)
+  const rateOf = (byItem, items) => {
+    const done = items.filter((it) => byItem?.[it.id] === true).length;
+    const holds = items.filter((it) => isNoShow(byItem, it.id)).length;
+    const denom = items.length - holds;
+    return { done, holds, denom };
+  };
+  const shortWeek = (w) => shortLabel(w.label) || w.id;
+
+  const tbl = el("table", { class: "grid" });
+  tbl.appendChild(
+    el("tr", {}, [
+      el("th", { class: "name-cell", text: "이름" }),
+      ...hwWeeks.map((w) => el("th", { text: shortWeek(w) })),
+    ])
+  );
+  let anyHold = false;
+  for (const name of names) {
     tbl.appendChild(
       el("tr", {}, [
-        el("th", { class: "name-cell", text: "이름" }),
-        ...items.map((_, i) => el("th", { text: `${i + 1}번` })),
-        el("th", { text: "완료율" }),
+        el("td", { class: "name-cell", text: name }),
+        ...hwWeeks.map((w) => {
+          const { done, holds, denom } = rateOf(byWeek.get(w.id).get(name), w.homework);
+          if (holds) anyHold = true;
+          if (!denom) return el("td", { class: "num" }, [el("span", { class: "hw-hold", text: "◌" })]);
+          return el("td", { class: "num", text: `${Math.round((done / denom) * 100)}%${holds ? " ◌" : ""}` });
+        }),
       ])
     );
-    let anyHold = false;
-    for (const r of rows) {
-      const done = items.filter((it) => r.byItem?.[it.id] === true).length;
-      const holds = items.filter((it) => isNoShow(r.byItem, it.id)).length;
-      if (holds) anyHold = true;
-      const denom = items.length - holds;
-      tbl.appendChild(
-        el("tr", {}, [
-          el("td", { class: "name-cell", text: r.name }),
-          ...items.map((it) =>
-            el("td", {}, [
-              r.byItem?.[it.id] === true
-                ? el("span", { class: "hw-yes", text: "✓" })
-                : isNoShow(r.byItem, it.id)
-                  ? el("span", { class: "hw-hold", text: "◌" })
-                  : el("span", { class: "t-dash", text: "–" }),
-            ])
-          ),
-          el("td", { class: "num", text: denom ? `${Math.round((done / denom) * 100)}%` : "–" }),
-        ])
-      );
+  }
+  // 학원 평균 행 (주차별 전체 완료율)
+  const avgRow = el("tr", { class: "t-avg-row" }, [el("td", { class: "name-cell", text: "학원 평균" })]);
+  for (const w of hwWeeks) {
+    let doneAll = 0;
+    let denomAll = 0;
+    for (const name of names) {
+      const { done, denom } = rateOf(byWeek.get(w.id).get(name), w.homework);
+      doneAll += done;
+      denomAll += denom;
     }
-    card.appendChild(el("div", { class: "table-wrap" }, [tbl]));
-    if (anyHold) {
-      card.appendChild(
-        el("p", { class: "hint", text: "◌ = 결석 등으로 확인 전 (완료율 계산에서 제외)" })
-      );
-    }
+    avgRow.appendChild(
+      el("td", { class: "num", text: denomAll ? `${Math.round((doneAll / denomAll) * 100)}%` : "–" })
+    );
+  }
+  tbl.appendChild(avgRow);
+  card.appendChild(el("div", { class: "table-wrap" }, [tbl]));
+  if (anyHold) {
+    card.appendChild(
+      el("p", { class: "hint", text: "◌ = 결석 등으로 확인 전인 숙제 포함 (완료율 계산에서 제외)" })
+    );
   }
   container.appendChild(card);
 }
@@ -794,17 +830,43 @@ function renderTeacherReports(container) {
   }
 }
 
-// ---------- 학생별 성적 (이름×단원 표) ----------
-function renderTeacherScores(container) {
+// ---------- 학생별 성적 (주차 선택 → 그 수업에 본 단원들만 표시) ----------
+function renderTeacherScores(container, weeks, selectedQuizWeek, onWeekChange) {
   const { teacher, academy } = session;
-  const quizzes = sortQuizzes(academy.quizzes, academy.weeks);
+  const allQuizzes = sortQuizzes(academy.quizzes, academy.weeks);
   const rows = teacher.snapshot?.scores || [];
   const card = el("div", { class: "card" }, [el("h2", { text: "학생별 성적" })]);
-  if (!quizzes.length || !rows.length) {
+  if (!allQuizzes.length || !rows.length) {
     card.appendChild(el("p", { class: "empty", text: "아직 등록된 퀴즈가 없습니다." }));
     container.appendChild(card);
     return;
   }
+
+  // 퀴즈가 있는 주차만 선택지로 (주차 미정 퀴즈는 '주차 미정' 그룹)
+  const groups = [];
+  for (const w of weeks) {
+    const qs = allQuizzes.filter((q) => q.weekId === w.id);
+    if (qs.length) groups.push({ key: w.id, label: w.label, quizzes: qs });
+  }
+  const tbd = allQuizzes.filter((q) => !q.weekId || !weeks.some((w) => w.id === q.weekId));
+  if (tbd.length) groups.push({ key: "", label: "주차 미정", quizzes: tbd });
+
+  const selected =
+    groups.find((g) => g.key === selectedQuizWeek) ||
+    groups.filter((g) => g.key !== "").pop() ||
+    groups[groups.length - 1];
+
+  const weekSel = el("select", { "aria-label": "퀴즈 주차 선택" });
+  for (const g of groups) {
+    weekSel.appendChild(el("option", { value: g.key, text: g.label, selected: g.key === selected.key }));
+  }
+  weekSel.addEventListener("change", () => onWeekChange(weekSel.value));
+  card.appendChild(el("div", { class: "week-select-row" }, [weekSel]));
+  card.appendChild(
+    el("p", { class: "hint", text: "선택한 주차(수업)에 본 단원 퀴즈의 점수만 표시됩니다." })
+  );
+
+  const quizzes = selected.quizzes;
   const tbl = el("table", { class: "grid" });
   tbl.appendChild(
     el("tr", {}, [
