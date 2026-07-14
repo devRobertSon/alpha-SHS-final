@@ -2141,6 +2141,71 @@ function renderPublishTab(container) {
   card.appendChild(log);
   container.appendChild(card);
 
+  // ---------- 접속 통계 (릴리스 다운로드 카운터 — README '접속 통계' 참고) ----------
+  // 포털이 로그인 성공 시 릴리스(visit-counter)의 작은 파일을 받아가고,
+  // 여기서는 GitHub 공개 API로 그 다운로드 횟수를 읽어 보여준다.
+  const statsCard = el("div", { class: "card" }, [el("h2", { text: "접속 통계" })]);
+  statsCard.appendChild(
+    el("p", {
+      class: "hint",
+      text: "학생·학부모/선생님 로그인 횟수입니다 (탭 기준 1회, 고유 인원 아님). GitHub 릴리스 다운로드 카운트로 집계하므로 외부 서비스가 없고, 학생·선생님 화면에는 표시되지 않습니다.",
+    })
+  );
+  const statsBox = el("div", { class: "visit-stats", text: "불러오는 중…" });
+  statsCard.appendChild(statsBox);
+  const statsBtn = el("button", { class: "btn btn-small", text: "↻ 새로고침" });
+  statsBtn.addEventListener("click", () => loadVisitStats());
+  statsCard.appendChild(statsBtn);
+  async function loadVisitStats() {
+    const owner = ownerIn.value.trim();
+    const name = nameIn.value.trim();
+    if (!owner || !name) {
+      statsBox.textContent = "위 '저장소 정보'(사용자명·저장소 이름)를 입력하면 접속 통계를 불러옵니다.";
+      return;
+    }
+    statsBox.textContent = "불러오는 중…";
+    try {
+      const res = await fetch(
+        `https://api.github.com/repos/${owner}/${name}/releases/tags/visit-counter`,
+        { cache: "no-store" }
+      );
+      if (res.status === 404) {
+        statsBox.textContent =
+          "아직 'visit-counter' 릴리스가 없습니다. README의 '접속 통계 켜기' 안내대로 릴리스를 한 번 만들면 다음 로그인부터 집계됩니다.";
+        return;
+      }
+      if (!res.ok) throw new Error(`GitHub API 오류 (${res.status})`);
+      const rel = await res.json();
+      const cnt = (n) => rel.assets?.find((a) => a.name === n)?.download_count;
+      const s = cnt("visit-student.bin");
+      const t = cnt("visit-teacher.bin");
+      let prev = null;
+      try {
+        prev = JSON.parse(localStorage.getItem("shs.visitstats"));
+      } catch {
+        /* 무시 */
+      }
+      const line = (cur, key) =>
+        cur == null
+          ? "릴리스에 파일이 없습니다"
+          : `누적 ${cur}회` +
+            (prev && prev[key] != null ? ` (지난 확인 이후 +${Math.max(0, cur - prev[key])})` : "");
+      statsBox.textContent =
+        `학생·학부모 · ${line(s, "student")}\n선생님 · ${line(t, "teacher")}` +
+        (prev?.at ? `\n지난 확인 · ${prev.at}` : "");
+      const now = new Date();
+      const hhmm = `${String(now.getHours()).padStart(2, "0")}:${String(now.getMinutes()).padStart(2, "0")}`;
+      localStorage.setItem(
+        "shs.visitstats",
+        JSON.stringify({ student: s, teacher: t, at: `${toYMD(now)} ${hhmm}` })
+      );
+    } catch (e) {
+      statsBox.textContent = "통계를 불러오지 못했습니다: " + e.message;
+    }
+  }
+  loadVisitStats();
+  container.appendChild(statsCard);
+
   // 백업/비밀번호
   const card2 = el("div", { class: "card" }, [el("h2", { text: "백업 · 비밀번호" })]);
   card2.appendChild(
