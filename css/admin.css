@@ -554,3 +554,69 @@ button.att-cell.att-x {
   font-size: 12px;
   color: var(--muted);
 }
+
+/* ---------- 공지 목록 / 자료(첨부) 행 ----------
+   portal.css와 같은 규칙 — admin.html은 portal.css를 로드하지 않으므로 여기에도 필요 */
+.notice {
+  border-bottom: 1px solid var(--hairline);
+  padding: 12px 0;
+}
+.notice:last-child {
+  border-bottom: none;
+}
+.notice-head {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+.notice-title {
+  font-weight: 600;
+  font-size: 15px;
+}
+.notice-date {
+  font-size: 12px;
+  color: var(--muted);
+  flex: 0 0 auto;
+  margin-left: auto;
+}
+.pin {
+  color: var(--accent);
+  font-size: 12px;
+  font-weight: 700;
+  flex: 0 0 auto;
+}
+.notice-body {
+  white-space: pre-wrap;
+  font-size: 14px;
+  color: var(--ink-2);
+  margin-top: 6px;
+}
+.material {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--hairline);
+}
+.material:last-child {
+  border-bottom: none;
+}
+.material .m-info {
+  min-width: 0;
+  flex: 1;
+}
+.material .m-title {
+  font-size: 15px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.material .m-meta {
+  font-size: 12px;
+  color: var(--muted);
+}
+.material .m-actions {
+  display: flex;
+  gap: 6px;
+  flex: 0 0 auto;
+}
