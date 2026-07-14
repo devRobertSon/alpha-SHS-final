@@ -151,6 +151,17 @@ export function isNoShow(map, id) {
   return !!map && id in map && map[id] === null;
 }
 
+// 접속 통계 핑 URL — 저장소 릴리스(visit-counter)의 작은 첨부 파일 주소.
+// 이 파일을 받아가면 GitHub이 다운로드 횟수를 +1 세고, 관리 페이지가 그 수를 읽는다.
+// GitHub Pages(*.github.io)에서만 주소를 만들 수 있고 그 외(localhost 등)는 null.
+export function visitPingURL(kind, loc = location) {
+  const m = String(loc.hostname || "").match(/^([^.]+)\.github\.io$/i);
+  if (!m) return null;
+  const seg = String(loc.pathname || "").split("/").filter(Boolean);
+  const repo = seg.length && !seg[0].includes(".") ? seg[0] : `${m[1]}.github.io`;
+  return `https://github.com/${m[1]}/${repo}/releases/download/visit-counter/visit-${kind}.bin`;
+}
+
 // 카톡 공유용 숙제 목록 텍스트 (관리자/학생 공용)
 export function homeworkShareText(academyName, week) {
   const lines = [`📌 [${academyName}] ${week.label} 숙제`];

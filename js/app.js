@@ -11,6 +11,7 @@ import {
   ATTENDANCE,
   isNoShow,
   toYMD,
+  visitPingURL,
 } from "./store.js";
 import { $, el, clear, toast, copyText, tabBar, setBusy, spinner } from "./ui.js";
 import { renderScoreChart, renderHistogram } from "./chart.js";
@@ -143,6 +144,7 @@ async function tryLogin(code, isAuto, remember = false) {
   try {
     session = await loginPortal(code, meta);
     if (!isAuto) storeCode(code, remember);
+    pingVisit(session.kind === "teacher" ? "teacher" : "student");
     if (session.kind === "teacher") renderTeacherDashboard();
     else renderDashboard();
     return true;
@@ -160,6 +162,21 @@ function logout() {
   for (const u of blobURLs.splice(0)) URL.revokeObjectURL(u);
   session = null;
   renderLogin();
+}
+
+// 접속 통계: 로그인 성공 시 탭 세션당 1회, 릴리스의 1바이트 파일을 조용히 받아
+// GitHub 다운로드 카운트만 +1 (GitHub 밖으로는 아무 신호도 없음, 실패해도 무시).
+// 릴리스(visit-counter)가 없으면 404가 나지만 no-cors라 화면에는 아무 영향 없음.
+function pingVisit(kind) {
+  try {
+    if (sessionStorage.getItem("shs.visit-pinged")) return;
+    const url = visitPingURL(kind);
+    if (!url) return; // localhost 등 — 집계하지 않음
+    sessionStorage.setItem("shs.visit-pinged", "1");
+    fetch(url, { mode: "no-cors", cache: "no-store" }).catch(() => {});
+  } catch {
+    /* 통계 실패는 무시 */
+  }
 }
 
 // ---------- 대시보드 ----------
