@@ -1859,6 +1859,38 @@ function renderNoticesTab(container) {
   );
   card.appendChild(list);
   container.appendChild(card);
+
+  // ---- 질문·문의 폼 (구글 폼) — 주소를 등록하면 학생 포털에 '질문·문의' 탭이 생긴다 ----
+  const qnaIn = el("input", {
+    type: "url",
+    value: blob.qnaUrl || "",
+    placeholder: "https://forms.gle/… (비워서 저장하면 탭 숨김)",
+  });
+  container.appendChild(
+    el("div", { class: "card" }, [
+      el("h2", { text: "질문·문의 폼 (구글 폼)" }),
+      el("p", {
+        class: "hint",
+        text:
+          "구글 폼 주소를 등록하면 이 학원 학생·학부모 포털에 '질문·문의' 탭이 생깁니다. " +
+          "접수된 질문은 구글 폼의 응답 화면(또는 연결된 시트)에서 확인하고, " +
+          "여러 학생에게 유용한 답변은 위 공지사항으로 올려 주세요. 저장 후 발행해야 반영됩니다.",
+      }),
+      el("label", { class: "field" }, [el("span", { text: "폼 주소" }), qnaIn]),
+      el("button", {
+        class: "btn btn-primary btn-small",
+        text: "저장",
+        onclick: () => {
+          const v = qnaIn.value.trim();
+          if (v && !/^https:\/\//i.test(v)) return toast("https:// 로 시작하는 주소를 입력해 주세요.", "error");
+          if (v) blob.qnaUrl = v;
+          else delete blob.qnaUrl;
+          markAcademy(S.selAcademy);
+          toast(v ? "저장되었습니다. 발행하면 포털에 '질문·문의' 탭이 생깁니다." : "폼 주소를 지웠습니다. 발행하면 탭이 사라집니다.", "ok");
+        },
+      }),
+    ])
+  );
 }
 
 // ---------- ⑦ 자료실 ----------

@@ -170,6 +170,8 @@ async function main() {
       name: A.name,
       weeks,
       quizzes,
+      // 한빛학원만 질문·문의 폼 주소 보유 → 탭 표시/숨김 두 경우 모두 테스트 가능
+      ...(A.name === "한빛학원" ? { qnaUrl: "https://forms.gle/sample-qna-form" } : {}),
       notices: [
         {
           id: randomHexId(6),

@@ -78,6 +78,7 @@ a {
   gap: 6px;
   min-height: 44px;
   padding: 8px 16px;
+  text-decoration: none; /* 링크(a.btn)도 버튼처럼 보이게 */
   border: 1px solid var(--hairline);
   border-radius: 10px;
   background: var(--surface);
@@ -118,6 +119,7 @@ a {
 input[type="text"],
 input[type="password"],
 input[type="email"],
+input[type="url"],
 input[type="number"],
 input[type="date"],
 select,
