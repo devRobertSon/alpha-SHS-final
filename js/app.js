@@ -216,6 +216,7 @@ function renderDashboard() {
     else if (id === "notice") renderNotices(content);
     else if (id === "material") renderMaterials(content, weeks);
     else if (id === "att") renderAttendance(content, weeks);
+    else if (id === "qna") renderQna(content);
     if (ids[id]) {
       seen = { ...seen, [id]: ids[id] };
       saveSeen(seen);
@@ -224,18 +225,17 @@ function renderDashboard() {
   };
 
   // 우선순위 순서: 해야 할 것(숙제) → 놓치면 안 되는 것(공지) → 확인할 것(퀴즈·리포트) → 기록 → 참고
-  const tabs = tabBar(
-    root,
-    [
-      { id: "hw", label: "숙제" },
-      { id: "notice", label: "공지사항" },
-      { id: "quiz", label: "퀴즈" },
-      { id: "report", label: "리포트" },
-      { id: "att", label: "출석·진도" },
-      { id: "material", label: "자료실" },
-    ],
-    renderTab
-  );
+  const tabDefs = [
+    { id: "hw", label: "숙제" },
+    { id: "notice", label: "공지사항" },
+    { id: "quiz", label: "퀴즈" },
+    { id: "report", label: "리포트" },
+    { id: "att", label: "출석·진도" },
+    { id: "material", label: "자료실" },
+  ];
+  // 질문·문의 탭은 학원이 관리 페이지에서 폼 주소를 등록한 경우에만 표시
+  if ((session.academy.qnaUrl || "").trim()) tabDefs.push({ id: "qna", label: "질문·문의" });
+  const tabs = tabBar(root, tabDefs, renderTab);
   root.appendChild(content);
 
   clear(app).appendChild(root);
@@ -621,6 +621,31 @@ function renderAttendance(container, weeks) {
     }
     card.appendChild(block);
   }
+  container.appendChild(card);
+}
+
+// ---------- ⑦ 질문·문의 (구글 폼 연동 — 학원이 폼 주소를 등록한 경우에만 탭 표시) ----------
+function renderQna(container) {
+  const url = (session.academy.qnaUrl || "").trim();
+  const card = el("div", { class: "card" }, [el("h2", { text: "질문·문의" })]);
+  card.appendChild(
+    el("p", {
+      class: "hint",
+      text:
+        "수업·퀴즈·숙제에 대해 궁금한 점을 남겨 주세요. 남긴 질문은 선생님만 볼 수 있으며, " +
+        "여러 학생에게 도움이 되는 답변은 공지사항 탭에 올라갑니다.",
+    })
+  );
+  card.appendChild(
+    el("a", {
+      class: "btn btn-primary btn-block",
+      href: url,
+      target: "_blank",
+      rel: "noopener",
+      text: "📝 질문 남기기",
+    })
+  );
+  card.appendChild(el("p", { class: "hint", text: "새 창에서 질문 양식(구글 폼)이 열립니다." }));
   container.appendChild(card);
 }
 
